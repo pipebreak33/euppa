@@ -36,6 +36,24 @@ Kräver PowerShell 7 (`pwsh`) och **bara en modul**: `Microsoft.Graph.Authentica
 `Invoke-MgGraphRequest` mot Microsoft Graph, så inga av de tunga Graph-undermodulerna behövs.
 `ImportExcel` behövs bara för Excel-export (annars blir det CSV).
 
+
+## Avinstallera
+
+**Windows** (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/pipebreak33/euppa/main/uninstall.ps1 | iex
+```
+
+**macOS / Linux:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/pipebreak33/euppa/main/uninstall.sh | sh
+```
+
+Tar bort programmet och kommandot `euppa` (och PATH-posten på Windows). Det behåller dina tenants och inställningar i `~/.euppa`, och rapporterna i `~/Documents/Euppa`.
+`EUPPA_PURGE=1` tar bort även dina data, och `EUPPA_YES=1` hoppar över frågan.
+
 ## Så funkar det
 
 - **Användare först.** *Användare…* listar alla i tenanten. Skriv för att fuzzy-söka, kryssa en eller flera med
