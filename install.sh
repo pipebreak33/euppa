@@ -5,6 +5,12 @@
 # Styr källan med EUPPA_REPO=ägare/repo och EUPPA_BRANCH=gren (eller en release-tagg).
 # Inga frågor: exitkod 0 = installerat, annat = fel.
 set -eu
+# Language: TRUPPA_LANG, else ~/.truppa/config.json (shared by the whole troupe), else English
+TL="${TRUPPA_LANG:-}"
+if [ -z "$TL" ] && [ -f "$HOME/.truppa/config.json" ]; then
+  TL="$(sed -n 's/.*"lang"[^"]*"\([a-z]*\)".*/\1/p' "$HOME/.truppa/config.json" 2>/dev/null | head -n 1)"
+fi
+t() { case "$TL" in sv*) printf '%s' "$2" ;; *) printf '%s' "$1" ;; esac; }
 START="$(date +%s)"
 
 REPO="${EUPPA_REPO:-pipebreak33/euppa}"
@@ -26,8 +32,8 @@ for c in python3 python; do
 done
 if [ -z "$PY" ]; then
   case "$(uname -s)" in
-    Darwin) die "Python 3.8+ saknas. Kör: xcode-select --install   (eller: brew install python)";;
-    *)      die "Python 3.8+ saknas. Kör: sudo apt install python3   (eller dnf/pacman motsvarande)";;
+    Darwin) die "$(t "Python 3.8+ is missing. Run: xcode-select --install   (or: brew install python)" "Python 3.8+ saknas. Kör: xcode-select --install   (eller: brew install python)")";;
+    *)      die "$(t "Python 3.8+ is missing. Run: sudo apt install python3   (or the dnf/pacman equivalent)" "Python 3.8+ saknas. Kör: sudo apt install python3   (eller dnf/pacman motsvarande)")";;
   esac
 fi
 
@@ -38,25 +44,25 @@ case "$0" in
     HERE="$(cd "$(dirname "$0")" 2>/dev/null && pwd || true)"
     if [ -n "$HERE" ] && [ -f "$HERE/euppa.py" ] && [ "${EUPPA_FROM_WEB:-}" != "1" ]; then
       SRC="$HERE"
-      say "Installerar från $HERE"
+      say "$(t "Installing from $HERE" "Installerar från $HERE")"
     fi;;
 esac
 TMP=""
 cleanup() { if [ -n "$TMP" ]; then rm -rf "$TMP"; fi; return 0; }
 trap cleanup EXIT
 if [ -z "$SRC" ]; then
-  command -v curl >/dev/null 2>&1 || die "curl saknas."
-  command -v tar >/dev/null 2>&1 || die "tar saknas."
+  command -v curl >/dev/null 2>&1 || die "$(t "curl is missing." "curl saknas.")"
+  command -v tar >/dev/null 2>&1 || die "$(t "tar is missing." "tar saknas.")"
   TMP="$(mktemp -d)"
-  say "Hämtar Euppa från github.com/$REPO ($BRANCH)"
+  say "$(t "Fetching Euppa from github.com/$REPO ($BRANCH)" "Hämtar Euppa från github.com/$REPO ($BRANCH)")"
   curl -fsSL "https://github.com/$REPO/archive/$BRANCH.tar.gz" -o "$TMP/euppa.tar.gz" \
-    || die "nedladdningen misslyckades – kolla nätet eller EUPPA_REPO/EUPPA_BRANCH"
-  tar -xzf "$TMP/euppa.tar.gz" -C "$TMP" || die "kunde inte packa upp arkivet"
+    || die "$(t "the download failed: check the network or EUPPA_REPO/EUPPA_BRANCH" "nedladdningen misslyckades – kolla nätet eller EUPPA_REPO/EUPPA_BRANCH")"
+  tar -xzf "$TMP/euppa.tar.gz" -C "$TMP" || die "$(t "could not unpack the archive" "kunde inte packa upp arkivet")"
   SRC="$(find "$TMP" -maxdepth 2 -name euppa.py -exec dirname {} \; | head -n 1)"
-  [ -n "$SRC" ] || die "arkivet innehåller inte Euppa"
+  [ -n "$SRC" ] || die "$(t "the archive does not contain Euppa" "arkivet innehåller inte Euppa")"
 fi
 "$PY" -c 'import ast,sys; ast.parse(open(sys.argv[1],encoding="utf-8").read())' "$SRC/euppa.py" \
-  || die "euppa.py är trasig"
+  || die "$(t "euppa.py is broken" "euppa.py är trasig")"
 
 # 3. Byt ut programmet (~/.euppa/app). Dina tenants och inställningar i ~/.euppa rörs inte.
 mkdir -p "$DIR" "$BIN"
@@ -86,7 +92,7 @@ case ":$PATH:" in
       *)      RC="$HOME/.profile" ;;
     esac
     grep -qs '.local/bin' "$RC" 2>/dev/null || printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$RC"
-    say "La till ~/.local/bin i PATH ($RC). Öppna en ny terminal."
+    say "$(t "Added ~/.local/bin to PATH ($RC). Open a new terminal." "La till ~/.local/bin i PATH ($RC). Öppna en ny terminal.")"
     ;;
 esac
 
@@ -95,17 +101,17 @@ PWSH="$(command -v pwsh || command -v pwsh-preview || true)"
 if [ -n "$PWSH" ]; then
   MISSING="$("$PWSH" -NoLogo -NoProfile -NonInteractive -Command '@("Microsoft.Graph.Authentication","ImportExcel") | Where-Object { -not (Get-Module -ListAvailable -Name $_) }' 2>/dev/null | tr '\n' ' ' || true)"
   if [ -n "$(printf '%s' "$MISSING" | tr -d ' ')" ]; then
-    warn "Moduler som saknas: $MISSING"
-    warn "Installera: $(basename "$PWSH") -c 'Install-PSResource $(printf '%s' "$MISSING" | sed 's/ *$//; s/ /,/g') -Scope CurrentUser -TrustRepository'   (eller: uppa install Microsoft.Graph)"
+    warn "$(t "Missing modules: $MISSING" "Moduler som saknas: $MISSING")"
+    warn "$(t "Install:" "Installera:") $(basename "$PWSH") -c 'Install-PSResource $(printf '%s' "$MISSING" | sed 's/ *$//; s/ /,/g') -Scope CurrentUser -TrustRepository'   $(t "(or:" "(eller:") uppa install Microsoft.Graph)"
   fi
 else
   case "$(uname -s)" in
-    Darwin) warn "PowerShell 7 (pwsh) saknas. Installera: brew install --cask powershell   (eller: uppa install powershell)";;
-    *)      warn "PowerShell 7 (pwsh) saknas. Se https://aka.ms/install-powershell   (eller: uppa install powershell)";;
+    Darwin) warn "$(t "PowerShell 7 (pwsh) is missing. Install: brew install --cask powershell   (or: uppa install powershell)" "PowerShell 7 (pwsh) saknas. Installera: brew install --cask powershell   (eller: uppa install powershell)")";;
+    *)      warn "$(t "PowerShell 7 (pwsh) is missing. See https://aka.ms/install-powershell   (or: uppa install powershell)" "PowerShell 7 (pwsh) saknas. Se https://aka.ms/install-powershell   (eller: uppa install powershell)")";;
   esac
 fi
 
 VER="$("$PY" "$APP/euppa.py" --version 2>/dev/null || echo euppa)"
 SECS=$(( $(date +%s) - START )); if [ "$SECS" -ge 60 ]; then TOOK="$((SECS / 60)) min $((SECS % 60)) s"; else TOOK="$SECS s"; fi
-printf '\n  \033[38;5;42m✔\033[0m %s installerad på %s. Kör: \033[1meuppa\033[0m\n' "$VER" "$TOOK"
-printf '  \033[2mAvinstallera: curl -fsSL https://raw.githubusercontent.com/pipebreak33/euppa/main/uninstall.sh | sh\033[0m\n\n'
+printf "$(t '\n  \033[38;5;42m✔\033[0m %s installed in %s. Run: \033[1meuppa\033[0m\n' '\n  \033[38;5;42m✔\033[0m %s installerad på %s. Kör: \033[1meuppa\033[0m\n')" "$VER" "$TOOK"
+printf "$(t '  \033[2mUninstall: curl -fsSL https://raw.githubusercontent.com/pipebreak33/euppa/main/uninstall.sh | sh\033[0m\n\n' '  \033[2mAvinstallera: curl -fsSL https://raw.githubusercontent.com/pipebreak33/euppa/main/uninstall.sh | sh\033[0m\n\n')"

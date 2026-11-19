@@ -1,27 +1,28 @@
 #!/usr/bin/env python3
-"""euppa – allt i Entra ID med några knapptryck. Windows, macOS och Linux.
+"""euppa – everything in Entra ID in a few keystrokes. Windows, macOS and Linux.
 
-  euppa                    meny
-  euppa tenants            tenants du loggat in i
-  euppa tenant NAMN        växla tenant
-  euppa ny                 lägg till en tenant för hand (oftast onödigt – inloggning sparar den)
-  euppa logga-in [--scopes A,B] [--enhetskod]   logga in i Microsoft Graph
-  euppa åtgärder [--json]  lista åtgärderna (--json: allt Ruppa behöver)
-  euppa kör ÅTGÄRD [Namn=värde …] [--ja] [--csv|--excel|--json]
-                           kör en åtgärd (frågar efter det som saknas). Ändrande åtgärder kräver --ja
-                           utan terminal. --csv/--excel sparar resultatet i ~/Documents/Euppa, --json skriver ut det
-  euppa användare [UPN …]  välj användare (flerval) och gör något med dem
-  euppa uppslag TYP [sök] [--alla] [--json]     sök i tenanten: user, group, device, app, sp, role, ca, sku …
-  euppa kom-ihåg på|av     spara inloggningar mellan körningar (nyckelringen)
-  euppa logga-ut           logga ut från Microsoft Graph
-  euppa hej
+  euppa                    menu
+  euppa tenants            tenants you have signed in to
+  euppa tenant NAME        switch tenant
+  euppa new                add a tenant by hand (rarely needed – signing in saves it)
+  euppa login [--scopes A,B] [--device-code]   sign in to Microsoft Graph
+  euppa actions [--json]   list the actions (--json: everything Ruppa needs)
+  euppa run ACTION [Name=value …] [--yes] [--csv|--excel|--json]
+                           run an action (asks for anything missing). Actions that change something need --yes
+                           without a terminal. --csv/--excel save the result in ~/Documents/Euppa, --json prints it
+  euppa users [UPN …]      pick users (multi-select) and do something with them
+  euppa lookup TYPE [query] [--all] [--json]    search the tenant: user, group, device, app, sp, role, ca, sku …
+  euppa remember on|off    keep sign-ins between runs (keychain)
+  euppa logout             sign out of Microsoft Graph
+  euppa lang [en|sv]       language for the whole troupe (English or Swedish)
+  euppa hello
 
-Allt går via Microsoft Graph (Invoke-MgGraphRequest) i PowerShell 7, med rätt scopes per åtgärd.
-Bara modulen Microsoft.Graph.Authentication behövs. Läsande åtgärder körs direkt, ändrande visar
-kommandot och kräver ett ja.
+Everything goes through Microsoft Graph (Invoke-MgGraphRequest) in PowerShell 7, with the right scopes per action.
+Only the Microsoft.Graph.Authentication module is needed. Reading actions run right away; actions that change
+something show the command and ask first.
 
-Flaggor: -n/--torr visar kommandon utan att köra något · --no-anim stänger av animationer.
-Data: ~/.euppa (kunder.json, config.json – inga hemligheter). Enbart standardbiblioteket, Python 3.8+.
+Flags: -n/--dry-run shows commands without running anything · --no-anim turns animations off.
+Data: ~/.euppa (kunder.json, config.json – no secrets). Standard library only, Python 3.8+.
 """
 from __future__ import annotations
 
@@ -41,7 +42,32 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-VERSION = "1.0.0"
+DOC_SV = """euppa – allt i Entra ID med några knapptryck. Windows, macOS och Linux.
+
+  euppa                    meny
+  euppa tenants            tenants du loggat in i
+  euppa tenant NAMN        växla tenant
+  euppa ny                 lägg till en tenant för hand (oftast onödigt – inloggning sparar den)
+  euppa logga-in [--scopes A,B] [--enhetskod]   logga in i Microsoft Graph
+  euppa åtgärder [--json]  lista åtgärderna (--json: allt Ruppa behöver)
+  euppa kör ÅTGÄRD [Namn=värde …] [--ja] [--csv|--excel|--json]
+                           kör en åtgärd (frågar efter det som saknas). Ändrande åtgärder kräver --ja
+                           utan terminal. --csv/--excel sparar resultatet i ~/Documents/Euppa, --json skriver ut det
+  euppa användare [UPN …]  välj användare (flerval) och gör något med dem
+  euppa uppslag TYP [sök] [--alla] [--json]     sök i tenanten: user, group, device, app, sp, role, ca, sku …
+  euppa kom-ihåg på|av     spara inloggningar mellan körningar (nyckelringen)
+  euppa logga-ut           logga ut från Microsoft Graph
+  euppa hej · euppa lang [en|sv]  språk för hela truppen
+
+Allt går via Microsoft Graph (Invoke-MgGraphRequest) i PowerShell 7, med rätt scopes per åtgärd.
+Bara modulen Microsoft.Graph.Authentication behövs. Läsande åtgärder körs direkt, ändrande visar
+kommandot och kräver ett ja.
+
+Flaggor: -n/--torr visar kommandon utan att köra något · --no-anim stänger av animationer.
+Data: ~/.euppa (kunder.json, config.json – inga hemligheter). Enbart standardbiblioteket, Python 3.8+.
+"""
+
+VERSION = "1.1.0"
 HOME = Path.home()
 DIR = Path(os.environ.get("EUPPA_DIR") or HOME / ".euppa")
 os.environ["EUPPA_DIR"] = str(DIR)
@@ -58,6 +84,42 @@ else:
     EXTRA_PATH = ["/opt/homebrew/bin", "/home/linuxbrew/.linuxbrew/bin", "/usr/local/bin",
                   "/usr/local/microsoft/powershell/7", "/snap/bin", "/usr/bin", "/bin"]
 os.environ["PATH"] = os.pathsep.join(dict.fromkeys(os.environ.get("PATH", "").split(os.pathsep) + EXTRA_PATH))
+
+# ───────────────────────────── language ─────────────────────────────
+# One setting for the whole troupe: ~/.truppa/config.json {"lang": "en"|"sv"}. TRUPPA_LANG overrides it. Default: English.
+TRUPPA = HOME / ".truppa" / "config.json"
+
+
+def _lang():
+    v = os.environ.get("TRUPPA_LANG")
+    if not v:
+        try:
+            v = json.loads(TRUPPA.read_text(encoding="utf-8")).get("lang")
+        except Exception:
+            v = None
+    return "sv" if str(v or "en").lower().startswith("sv") else "en"
+
+
+LANG = _lang()
+os.environ["TRUPPA_LANG"] = LANG          # the PowerShell worker reads it too
+
+
+def L(en, sv):
+    """The text in the chosen language (English first)."""
+    return sv if LANG == "sv" else en
+
+
+def set_lang(lang):
+    global LANG
+    TRUPPA.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        cfg = json.loads(TRUPPA.read_text(encoding="utf-8"))
+    except Exception:
+        cfg = {}
+    cfg["lang"] = lang
+    TRUPPA.write_text(json.dumps(cfg, indent=1), encoding="utf-8")
+    LANG = lang
+    os.environ["TRUPPA_LANG"] = lang
 
 
 def _win_console():
@@ -121,7 +183,7 @@ def open_file(path):
         else:
             subprocess.Popen([shutil.which("xdg-open") or "xdg-open", str(path)])
     except Exception:
-        out(dim(f"  Öppna själv: {path}"))
+        out(dim(L(f"  Open it yourself: {path}", f"  Öppna själv: {path}")))
 
 
 # ───────────────────────────── terminal ─────────────────────────────
@@ -256,7 +318,17 @@ SHADE = ["38;5;218", "38;5;212", "38;5;205", "38;5;199", "38;5;163", "38;5;126"]
 SAD_SHADE = ["38;5;181", "38;5;175", "38;5;139", "38;5;133", "38;5;96", "38;5;59"]
 ART_W = 9
 LOGO = "E›"
-JOKES = [
+JOKES_EN = [
+    "I'm Euppa. E for Entra. Or Efficient. Or an E with eyes.",
+    "Conditional Access is a bouncer. Report-only is the bouncer who just takes notes.",
+    "Azure AD is called Entra ID now. I was never called anything else, so I didn't have to change.",
+    "There are two kinds of admins: those with a break-glass account, and those who will get one.",
+    "A secret that expires tomorrow is an incident the day after. I keep an eye on them.",
+    "Global Admin for everyone? No. PIM for whoever needs it, when they need it.",
+    "Invoke-MgGraphRequest: because one module is enough when you speak REST.",
+    "I'm happy to tick 200 users for you. I only ask once before I change anything.",
+]
+JOKES_SV = [
     "Jag heter Euppa. E som i Entra. Eller Effektiv. Eller Ett E med ögon.",
     "Villkorlig åtkomst är som en dörrvakt. Report-only är dörrvakten som bara antecknar.",
     "Azure AD heter Entra ID nu. Jag hette aldrig något annat, så jag slapp byta.",
@@ -514,12 +586,12 @@ def choose(rows, title="", msg="", mood="happy", sub="", status=None, start=None
             lines += [""] + status()
         lines.append("")
         if st["q"]:
-            lines.append("  " + accent("⌕ ") + bold(st["q"]) + accent("▏") + dim(f"  {len(sel)} träffar"))
+            lines.append("  " + accent("⌕ ") + bold(st["q"]) + accent("▏") + dim(L(f"  {len(sel)} matches", f"  {len(sel)} träffar")))
         elif title:
             lines.append("  " + accent("▍") + bold(title))
         narrow = w < 58
         if not sel:
-            lines.append("     " + dim("Inga träffar. Backsteg ändrar, esc rensar."))
+            lines.append("     " + dim(L("No matches. Backspace edits, esc clears.", "Inga träffar. Backsteg ändrar, esc rensar.")))
         labels = [vr[k]["label"] for k in sel] or [""]
         lw = min(max(len(x) for x in labels) + 2, max(10, w - 14 if narrow else min(38, w // 2)))
         room = max(3, height() - len(lines) - 5)     # ↑/↓ fler, tomrad och hjälptext
@@ -528,7 +600,7 @@ def choose(rows, title="", msg="", mood="happy", sub="", status=None, start=None
         top = max(0, min(top, max(0, len(vr) - room)))
         st["top"] = top
         if top > 0:
-            lines.append(dim("     ↑ fler"))
+            lines.append(dim(L("     ↑ more", "     ↑ fler")))
         num = {k: n for n, k in keys.items()}
         anybadge = any(vr[j].get("badge") for j in sel)
         for k in range(top, min(len(vr), top + room)):
@@ -549,13 +621,13 @@ def choose(rows, title="", msg="", mood="happy", sub="", status=None, start=None
                     line += dim(ANSI.sub("", r["hint"]))
             lines.append(line)
         if top + room < len(vr):
-            lines.append(dim("     ↓ fler"))
+            lines.append(dim(L("     ↓ more", "     ↓ fler")))
         lines.append("")
         if st["q"]:
-            help_ = "↑/↓ · enter väljer · backsteg · esc rensar" if w >= 50 else "↑↓ enter · esc"
+            help_ = L("↑/↓ · enter picks · backspace · esc clears", "↑/↓ · enter väljer · backsteg · esc rensar") if w >= 50 else "↑↓ enter · esc"
         else:
-            help_ = ((footer or "↑/↓ · enter · siffra väljer · q tillbaka") + " · skriv för att söka") if w >= 72 else \
-                (footer or "↑/↓ · enter · q tillbaka") if w >= 50 else "↑↓ enter · q"
+            help_ = ((footer or L("↑/↓ · enter · number picks · q back", "↑/↓ · enter · siffra väljer · q tillbaka")) + L(" · type to search", " · skriv för att söka")) if w >= 72 else \
+                (footer or L("↑/↓ · enter · q back", "↑/↓ · enter · q tillbaka")) if w >= 50 else "↑↓ enter · q"
         lines.append(dim("   " + help_))
         live.draw(lines)
 
@@ -654,7 +726,7 @@ def ask_text(question, default="", required=False, check=None, secret=False):
     for k, l in enumerate(wrap(question, w - 6, 6)):
         out(("  " + accent("?") + " " if k == 0 else "    ") + bold(l))
     if default:
-        out("    " + dim("standard: " + cut(default, w - 16) + "  (enter behåller)"))
+        out("    " + dim(L("default: ", "standard: ") + cut(default, w - 16) + L("  (enter keeps it)", "  (enter behåller)")))
     while True:
         try:
             if secret:
@@ -669,7 +741,7 @@ def ask_text(question, default="", required=False, check=None, secret=False):
         if not v:
             v = default
         if not v and required:
-            out("    " + yellow("Det här behövs. Ctrl+C avbryter."))
+            out("    " + yellow(L("This is needed. Ctrl+C cancels.", "Det här behövs. Ctrl+C avbryter.")))
             continue
         if check and v:
             err = check(v)
@@ -697,7 +769,7 @@ def pause():
     """Vänta på enter (eller esc/q) innan skärmen töms. Läser tangenter rått så att piltangenter inte syns som ^[[A."""
     if ITTY:
         print()
-        sys.stdout.write(dim("   enter = tillbaka till menyn "))
+        sys.stdout.write(dim(L("   enter = back to the menu ", "   enter = tillbaka till menyn ")))
         sys.stdout.flush()
         kb = Keys()
         try:
@@ -733,20 +805,20 @@ def pick_many(items, title, chosen=None):
         w = width()
         lines = [""]
         if st["q"]:
-            lines.append("  " + accent("⌕ ") + bold(st["q"]) + accent("▏") + dim(f"  {len(vis)} träffar"))
+            lines.append("  " + accent("⌕ ") + bold(st["q"]) + accent("▏") + dim(L(f"  {len(vis)} matches", f"  {len(vis)} träffar")))
         else:
-            lines.append("  " + accent("▍") + bold(title) + dim(f"  {len(items)} st · skriv för att söka"))
-        lines.append("  " + (green(f"{len(chosen)} valda: ") + cut(", ".join(
-            next((i[1] for i in items if i[0] == v), v) for v in chosen), w - 16) if chosen else dim("Inga valda än.")))
+            lines.append("  " + accent("▍") + bold(title) + dim(L(f"  {len(items)} · type to search", f"  {len(items)} st · skriv för att söka")))
+        lines.append("  " + (green(L(f"{len(chosen)} selected: ", f"{len(chosen)} valda: ")) + cut(", ".join(
+            next((i[1] for i in items if i[0] == v), v) for v in chosen), w - 16) if chosen else dim(L("None selected yet.", "Inga valda än."))))
         lines.append("")
         room = max(3, height() - len(lines) - 4)
         pos = min(st["pos"], max(0, len(vis) - 1))
         top = min(max(st["top"], pos - room + 1), pos)
         st["top"], st["pos"] = top, pos
         if not vis:
-            lines.append("     " + dim("Inga träffar. Backsteg ändrar, esc rensar."))
+            lines.append("     " + dim(L("No matches. Backspace edits, esc clears.", "Inga träffar. Backsteg ändrar, esc rensar.")))
         if top > 0:
-            lines.append(dim("     ↑ fler"))
+            lines.append(dim(L("     ↑ more", "     ↑ fler")))
         nw = min(max([len(v[1]) for v in vis[top:top + room]] or [10]) + 2, max(12, w // 2 - 6))
         for k in range(top, min(len(vis), top + room)):
             v = vis[k]
@@ -758,10 +830,10 @@ def pick_many(items, title, chosen=None):
                 line += dim(v[2] or v[0])
             lines.append(line)
         if top + room < len(vis):
-            lines.append(dim("     ↓ fler"))
+            lines.append(dim(L("     ↓ more", "     ↓ fler")))
         lines.append("")
-        lines.append(dim("   " + ("mellanslag/tab kryssar · ctrl+a alla som syns · enter klar · esc avbryter"
-                                  if w >= 80 else "tab kryssar · enter klar · esc")))
+        lines.append(dim("   " + (L("space/tab ticks · ctrl+a all visible · enter done · esc cancels", "mellanslag/tab kryssar · ctrl+a alla som syns · enter klar · esc avbryter")
+                                  if w >= 80 else L("tab ticks · enter done · esc", "tab kryssar · enter klar · esc"))))
         live.draw(lines)
 
     kb = Keys()
@@ -986,6 +1058,20 @@ function global:Graph {
   } else { $r }
 }
 function global:Enc([string]$s) { [uri]::EscapeDataString($s) }
+function global:T([string]$en, [string]$sv) { if ($env:TRUPPA_LANG -eq 'sv') { $sv } else { $en } }
+function global:EuTr($o) {
+  if ($env:TRUPPA_LANG -eq 'sv' -or -not $global:EuCols) { return $o }
+  if ($o -is [string]) { if ($global:EuVals.ContainsKey($o)) { return $global:EuVals[$o] } else { return $o } }
+  if ($o -isnot [System.Management.Automation.PSCustomObject]) { return $o }
+  $n = [ordered]@{}
+  foreach ($pp in $o.PSObject.Properties) {
+    $k = if ($global:EuCols.ContainsKey($pp.Name)) { $global:EuCols[$pp.Name] } else { $pp.Name }
+    $v = $pp.Value
+    if ($v -is [string] -and $global:EuVals.ContainsKey($v)) { $v = $global:EuVals[$v] }
+    $n[$k] = $v
+  }
+  [pscustomobject]$n
+}
 function global:Q([string]$s) { $s -replace "'", "''" }
 function global:Seg([string]$s) { $s -replace '%', '%25' -replace '#', '%23' -replace '\?', '%3F' -replace '/', '%2F' }
 function global:Items([string]$s) { @($s -split '[,;\r\n]+' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
@@ -1031,7 +1117,7 @@ function global:Users([string]$s) {
       $err = $_
       $hit = @()
       if ($x -notmatch '@') { try { $hit = @(Graph ('users?$select=' + $global:EuUserSel + '&$filter=' + (Enc "displayName eq '$(Q $x)'"))) } catch { } }
-      if ($hit.Count -eq 1) { $hit[0] } else { Write-Error ("Hittar ingen användare '{0}': {1}" -f $x, (Msg $err)) }
+      if ($hit.Count -eq 1) { $hit[0] } else { Write-Error ((T "Can't find a user '{0}': {1}" "Hittar ingen användare '{0}': {1}") -f $x, (Msg $err)) }
     }
   }
 }
@@ -1044,8 +1130,8 @@ function global:Groups([string]$s) {
       else { $hit = @(Graph ('groups?' + $sel + '&$filter=' + (Enc "mail eq '$(Q $x)' or displayName eq '$(Q $x)'"))) }
     } catch { }
     if ($hit.Count -eq 1) { $hit[0] }
-    elseif ($hit.Count -gt 1) { Write-Error "Flera grupper heter '$x'. Välj med id i stället (euppa uppslag group $x)." }
-    else { Write-Error "Hittar ingen grupp '$x'." }
+    elseif ($hit.Count -gt 1) { Write-Error (T "Several groups are called '$x'. Pick by id instead (euppa lookup group $x)." "Flera grupper heter '$x'. Välj med id i stället (euppa uppslag group $x).") }
+    else { Write-Error (T "Can't find a group '$x'." "Hittar ingen grupp '$x'.") }
   }
 }
 function global:Devices([string]$s) {
@@ -1058,8 +1144,8 @@ function global:Devices([string]$s) {
         if (-not $hit.Count) { $hit = @(Graph ("devices/$x" + '?' + $sel)) }
       } else { $hit = @(Graph ('devices?' + $sel + '&$filter=' + (Enc "displayName eq '$(Q $x)'"))) }
     } catch { }
-    if ($hit.Count -gt 1) { Write-Warning "$($hit.Count) enheter heter '$x' – tar alla." }
-    if ($hit.Count) { $hit } else { Write-Error "Hittar ingen enhet '$x'." }
+    if ($hit.Count -gt 1) { Write-Warning (T "$($hit.Count) devices are called '$x' – taking all of them." "$($hit.Count) enheter heter '$x' – tar alla.") }
+    if ($hit.Count) { $hit } else { Write-Error (T "Can't find a device '$x'." "Hittar ingen enhet '$x'.") }
   }
 }
 function global:Apps([string]$s) {
@@ -1069,8 +1155,8 @@ function global:Apps([string]$s) {
       if (IsGuid $x) { $hit = @(Graph ('applications?$filter=' + (Enc "appId eq '$x'"))); if (-not $hit.Count) { $hit = @(Graph "applications/$x") } }
       else { $hit = @(Graph ('applications?$filter=' + (Enc "displayName eq '$(Q $x)'"))) }
     } catch { }
-    if ($hit.Count -eq 1) { $hit[0] } elseif ($hit.Count -gt 1) { Write-Error "Flera appar heter '$x'. Använd AppId." }
-    else { Write-Error "Hittar ingen appregistrering '$x'." }
+    if ($hit.Count -eq 1) { $hit[0] } elseif ($hit.Count -gt 1) { Write-Error (T "Several apps are called '$x'. Use the AppId." "Flera appar heter '$x'. Använd AppId.") }
+    else { Write-Error (T "Can't find an app registration '$x'." "Hittar ingen appregistrering '$x'.") }
   }
 }
 function global:Sps([string]$s) {
@@ -1080,8 +1166,8 @@ function global:Sps([string]$s) {
       if (IsGuid $x) { $hit = @(Graph ('servicePrincipals?$filter=' + (Enc "appId eq '$x'"))); if (-not $hit.Count) { $hit = @(Graph "servicePrincipals/$x") } }
       else { $hit = @(Graph ('servicePrincipals?$filter=' + (Enc "displayName eq '$(Q $x)'"))) }
     } catch { }
-    if ($hit.Count -eq 1) { $hit[0] } elseif ($hit.Count -gt 1) { Write-Error "Flera företagsappar heter '$x'. Använd AppId." }
-    else { Write-Error "Hittar ingen företagsapp '$x'." }
+    if ($hit.Count -eq 1) { $hit[0] } elseif ($hit.Count -gt 1) { Write-Error (T "Several enterprise apps are called '$x'. Use the AppId." "Flera företagsappar heter '$x'. Använd AppId.") }
+    else { Write-Error (T "Can't find an enterprise app '$x'." "Hittar ingen företagsapp '$x'.") }
   }
 }
 function global:SpByAppId([string]$appId) {
@@ -1096,13 +1182,13 @@ function global:Roles([string]$s) {
       if (IsGuid $x) { $hit = @(Graph "roleManagement/directory/roleDefinitions/$x") }
       else { $hit = @(Graph ('roleManagement/directory/roleDefinitions?$filter=' + (Enc "displayName eq '$(Q $x)'"))) }
     } catch { }
-    if ($hit.Count) { $hit[0] } else { Write-Error "Hittar ingen roll '$x'." }
+    if ($hit.Count) { $hit[0] } else { Write-Error (T "Can't find a role '$x'." "Hittar ingen roll '$x'.") }
   }
 }
 function global:Sku([string]$s) {
   $all = @(Graph 'subscribedSkus')
   $hit = @($all | Where-Object { $_.skuPartNumber -eq $s -or $_.skuId -eq $s })
-  if (-not $hit.Count) { throw "Hittar ingen licens '$s' i tenanten. Finns: $(($all.skuPartNumber) -join ', ')" }
+  if (-not $hit.Count) { throw (T "Can't find a license '$s' in the tenant. Available: $(($all.skuPartNumber) -join ', ')" "Hittar ingen licens '$s' i tenanten. Finns: $(($all.skuPartNumber) -join ', ')") }
   $hit[0]
 }
 function global:CaPolicies([string]$s) {
@@ -1111,7 +1197,7 @@ function global:CaPolicies([string]$s) {
     if (IsGuid $x) { try { Graph "identity/conditionalAccess/policies/$x"; continue } catch { } }
     if ($null -eq $all) { $all = @(Graph 'identity/conditionalAccess/policies') }
     $hit = @($all | Where-Object { $_.displayName -eq $x })
-    if ($hit.Count) { $hit[0] } else { Write-Error "Hittar ingen policy '$x'." }
+    if ($hit.Count) { $hit[0] } else { Write-Error (T "Can't find a policy '$x'." "Hittar ingen policy '$x'.") }
   }
 }
 function global:Ref($id) { @{ '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$id" } }
@@ -1151,7 +1237,8 @@ while ($true) {
     }
   } catch { $st.ok = $false; Out-Euppa 'E' (Msg $_) }
   if ($data.Count -and -not ($data.Count -eq 1 -and $data[0] -is [bool])) {
-    $global:EuppaLast = $data.ToArray()
+    $data = @($data | ForEach-Object { EuTr $_ })
+    $global:EuppaLast = $data
     try { $data | Out-String -Stream -Width $w | ForEach-Object { [Console]::Out.WriteLine("${R}O " + $_) } }
     catch { Out-Euppa 'E' $_.ToString() }
   }
@@ -1190,10 +1277,23 @@ class Worker:
                     q.put(line.rstrip("\n"))
                 q.put(None)
             threading.Thread(target=reader, daemon=True).start()
-        while True:                  # första D-raden = redo
+        while True:                  # the first D line = ready
             ln = self.q.get()
             if ln is None or ln.startswith(R + "D"):
                 break
+        if ln is not None:           # English column names and values for the output
+            init = ("$global:EuCols = @{}; $global:EuVals = @{}\n" +
+                    "".join(f"$global:EuCols[{psq(k)}] = {psq(v)}\n" for k, v in COLS_EN.items()) +
+                    "".join(f"$global:EuVals[{psq(k)}] = {psq(v)}\n" for k, v in VALUES_EN.items()))
+            try:
+                self.p.stdin.write(f"200\n{init}\n{R}END\n")
+                self.p.stdin.flush()
+                while True:
+                    ln = self.q.get()
+                    if ln is None or ln.startswith(R + "D"):
+                        break
+            except (OSError, AttributeError):
+                pass
         self.ready.set()
 
     def warm(self):
@@ -1219,13 +1319,13 @@ class Worker:
             self.p.stdin.write(payload)
             self.p.stdin.flush()
         except (BrokenPipeError, OSError, AttributeError):
-            on_event("E", "PowerShell-processen har stängts. Försök igen.")
+            on_event("E", L("The PowerShell process has closed. Try again.", "PowerShell-processen har stängts. Försök igen."))
             self.p = None
             return False, 0
         while True:
             ln = self.q.get()
             if ln is None:
-                on_event("E", "PowerShell-processen avslutades oväntat.")
+                on_event("E", L("The PowerShell process exited unexpectedly.", "PowerShell-processen avslutades oväntat."))
                 self.p = None
                 return False, 0
             if ln.startswith(R):
@@ -1268,7 +1368,7 @@ class Runner:
                 if m:
                     code = m.group(2)
                     copied = copy_text(code)
-                    self.msg = f"Logga in på {m.group(1).split('//')[-1]} med koden {code}" + \
+                    self.msg = L(f"Sign in at {m.group(1).split('//')[-1]} with the code {code}", f"Logga in på {m.group(1).split('//')[-1]} med koden {code}") + \
                         (" (kopierad)." if copied else ".")
                     if not ANIM:
                         out(f"  {LOGO} {self.msg}")
@@ -1320,7 +1420,7 @@ def run_ps(title, code, show_output=True, max_lines=None):
         with r:
             ok, n = WORKER.run(code, r.event)
     except KeyboardInterrupt:
-        out(yellow("  Avbrutet. PowerShell-sessionen startas om (inloggningen nollställs)."))
+        out(yellow(L("  Cancelled. The PowerShell session restarts (the sign-in is reset).", "  Avbrutet. PowerShell-sessionen startas om (inloggningen nollställs).")))
         WORKER.stop()
         WORKER.warm()
         return False, 0, r.lines
@@ -1330,19 +1430,28 @@ def run_ps(title, code, show_output=True, max_lines=None):
 
 
 HINTS = [
-    (r"AADSTS65001|consent|samtycke", "Appen Microsoft Graph Command Line Tools saknar samtycke för det här scopet. "
-     "En admin måste godkänna (logga in som Global Admin och svara ja i webbläsaren)."),
-    (r"AADSTS50020|AADSTS50034", "Kontot finns inte i den här tenanten. Logga in med ett konto där."),
-    (r"AADSTS50076|AADSTS50079|AADSTS50158", "Inloggningen kräver MFA eller ett villkor. Logga in interaktivt igen."),
+    (r"AADSTS65001|consent|samtycke", L("The Microsoft Graph Command Line Tools app has no consent for this scope. An admin "
+     "must approve it (sign in as a Global Admin and say yes in the browser).",
+     "Appen Microsoft Graph Command Line Tools saknar samtycke för det här scopet. En admin måste godkänna (logga in "
+     "som Global Admin och svara ja i webbläsaren).")),
+    (r"AADSTS50020|AADSTS50034", L("The account doesn't exist in this tenant. Sign in with an account there.",
+                                   "Kontot finns inte i den här tenanten. Logga in med ett konto där.")),
+    (r"AADSTS50076|AADSTS50079|AADSTS50158", L("The sign-in requires MFA or a condition. Sign in interactively again.",
+                                               "Inloggningen kräver MFA eller ett villkor. Logga in interaktivt igen.")),
     (r"Authorization_RequestDenied|Insufficient privileges|\(403\)|Forbidden|Access is denied",
-     "Behörighet saknas: kontot har inte rätt adminroll (eller scopet godkändes inte) för det här."),
+     L("Permission missing: the account lacks the right admin role (or the scope wasn't approved) for this.",
+       "Behörighet saknas: kontot har inte rätt adminroll (eller scopet godkändes inte) för det här.")),
     (r"Premium|P1|P2|license.*required|tenant is not licensed|RequestFromNonPremiumTenant",
-     "Det här kräver Entra ID P1/P2-licens i tenanten (inloggningsloggar, riskanvändare och PIM gör det)."),
-    (r"Request_ResourceNotFound|does not exist|Hittar ingen", "Hittade inget med det namnet. Skriv en del av namnet så "
-     "söker Euppa fram rätt objekt."),
-    (r"is not recognized as (a|the) name of a cmdlet", "Ett kommando saknas – installera modulen "
-     "Microsoft.Graph.Authentication (uppa install Microsoft.Graph)."),
-    (r"Authentication needed|Connect-MgGraph", "Inte inloggad i Graph. Välj Logga in i menyn (eller: euppa logga-in)."),
+     L("This needs an Entra ID P1/P2 license in the tenant (sign-in logs, risky users and PIM do).",
+       "Det här kräver Entra ID P1/P2-licens i tenanten (inloggningsloggar, riskanvändare och PIM gör det).")),
+    (r"Request_ResourceNotFound|does not exist|Hittar ingen|Can't find", L("Nothing found with that name. Type part of the "
+     "name and Euppa searches for the right object.", "Hittade inget med det namnet. Skriv en del av namnet så söker Euppa "
+     "fram rätt objekt.")),
+    (r"is not recognized as (a|the) name of a cmdlet", L("A command is missing – install the Microsoft.Graph.Authentication "
+     "module (uppa install Microsoft.Graph).", "Ett kommando saknas – installera modulen Microsoft.Graph.Authentication "
+     "(uppa install Microsoft.Graph).")),
+    (r"Authentication needed|Connect-MgGraph", L("Not signed in to Graph. Choose Sign in in the menu (or: euppa login).",
+                                                 "Inte inloggad i Graph. Välj Logga in i menyn (eller: euppa logga-in).")),
 ]
 
 
@@ -1360,7 +1469,7 @@ def print_output(lines, max_lines=None, quiet_host=False):
     w = width()
     lines = [(k, re.split(r"\s+(?:Date|Headers)\s*:", t, 1)[0] if k == "E" else t) for k, t in lines]
     errs = [t for k, t in lines if k == "E"]
-    lines = [(k, t) for k, t in lines if not t.startswith(("EUPPA-WHO|", "EUPPA-PICK|"))]
+    lines = [(k, t) for k, t in lines if not t.startswith(("EUPPA-WHO|", "EUPPA-PICK|", "EUPPA-SAVED|"))]
     lines = [(k, t) for k, t in lines
              if not (k in ("H", "W") and any(e[:50] in t or t.replace("WARNING: ", "")[:50] in e for e in errs if e))]
     body = [t for k, t in lines if k == "O"]
@@ -1381,7 +1490,7 @@ def print_output(lines, max_lines=None, quiet_host=False):
     for l in body[:limit]:
         out("  " + l)
     if len(body) > limit:
-        out(dim(f"  … +{len(body) - limit} rader. Exportera till Excel eller CSV för att få allt."))
+        out(dim(L(f"  … +{len(body) - limit} rows. Export to Excel or CSV to get everything.", f"  … +{len(body) - limit} rader. Exportera till Excel eller CSV för att få allt.")))
     for k, t in lines:
         if k == "E":
             for i, l in enumerate(wrap(t, w - 8, 5)):
@@ -1414,7 +1523,7 @@ def hl(line):
     return TOK.sub(rep, line)
 
 
-def show_command(code, title="Kommando som körs"):
+def show_command(code, title=L("Command being run", "Kommando som körs")):
     """Hela kommandot syns – långa rader bryts (↪) i stället för att klippas."""
     global DIRTY
     DIRTY = True
@@ -1430,7 +1539,7 @@ def show_command(code, title="Kommando som körs"):
 
 
 # ───────────────────────────── inloggning ─────────────────────────────
-AUTHS = {"interactive": "Webbläsare (interaktiv)", "device": "Enhetskod (device login)"}
+AUTHS = {"interactive": L("Browser (interactive)", "Webbläsare (interaktiv)"), "device": L("Device code", "Enhetskod (device login)")}
 WHO = "EUPPA-WHO|"
 WHO_PS = ("$global:EuMe = $null; $global:EuSp = $null; $c = Get-MgContext; $o = $null\n"
           "try { $o = @(Graph 'organization?$select=id,displayName,verifiedDomains')[0] } catch { }\n"
@@ -1479,18 +1588,18 @@ def ensure(t, scopes, show=True):
         show_command(code, "Loggar in")
     if DRY:
         return t or {}
-    title = "Loggar in i Microsoft Graph" + (f" ({t['name']})" if t and t.get("name") else " – välj konto i webbläsaren")
+    title = "Loggar in i Microsoft Graph" + (f" ({t['name']})" if t and t.get("name") else L(" – pick an account in the browser", " – välj konto i webbläsaren"))
     ok, _, lines = run_ps(title, code + "\n" + WHO_PS, show_output=False)
     if not ok:
         print_output(lines, quiet_host=not ANIM)
-        say("Kunde inte logga in i Microsoft Graph. Felet står ovanför.", "sad")
+        say(L("Could not sign in to Microsoft Graph. The error is above.", "Kunde inte logga in i Microsoft Graph. Felet står ovanför."), "sad")
         return None
     who = next((x[1][len(WHO):].split("|") for x in lines if x[0] == "H" and x[1].startswith(WHO)), None)
     if who and any(who):
         before = t["name"] if t else None
         t, new = remember_login(who)
         if before and before != t["name"]:
-            out("  " + yellow("!") + f" Du loggade in i {bold(t['name'])}, inte {before}. Bytte tenant.")
+            out("  " + yellow("!") + L(f" You signed in to {bold(t['name'])}, not {before}. Switched tenant.", f" Du loggade in i {bold(t['name'])}, inte {before}. Bytte tenant."))
         if new:
             out("  " + green("✔") + f" Ny tenant i listan: {bold(t['name'])} " + dim(t.get("tenant", "")))
     if not t:
@@ -1505,7 +1614,7 @@ def conn_status():
     t = active_tenant()
     w = width()
     if not t:
-        head = f"  {dim('Tenant')} {dim('ingen vald – jag loggar in när en åtgärd behöver det')}"
+        head = f"  {dim('Tenant')} {dim(L('none selected – I sign in when an action needs it', 'ingen vald – jag loggar in när en åtgärd behöver det'))}"
     else:
         head = f"  {dim('Tenant')} {bold(t['name'])}"
         if w >= 58:
@@ -1513,7 +1622,7 @@ def conn_status():
         if w >= 96 and t.get("upn"):
             head += dim(f"  ·  {t['upn']}")
     on = bool(t) and WORKER.conn and WORKER.conn[0] == t["name"]
-    graph = (green("● ") + "Graph" + dim(f" · {len(WORKER.conn[1])} scopes")) if on else (dim("○ Graph – inte inloggad"))
+    graph = (green("● ") + "Graph" + dim(f" · {len(WORKER.conn[1])} scopes")) if on else (dim(L("○ Graph – not signed in", "○ Graph – inte inloggad")))
     return [head, "  " + graph + dim("  ·  " + AUTHS[auth_of(t)].split(" ")[0].lower())]
 
 
@@ -1523,12 +1632,14 @@ def logout():
     show_command("Disconnect-MgGraph", "Loggar ut")
     if DRY:
         return True
-    run_ps("Loggar ut från Microsoft Graph", code, show_output=False)
+    run_ps(L("Signing out of Microsoft Graph", "Loggar ut från Microsoft Graph"), code, show_output=False)
     WORKER.stop()
     WORKER.warm()
     LOOKUP_CACHE.clear()
-    say("Utloggad från Microsoft Graph. Nästa gång frågar jag efter inloggning igen. (Webbläsarens "
-        "Microsoft-inloggning ligger kvar – logga ut där också om datorn delas.)", "happy")
+    say(L("Signed out of Microsoft Graph. I'll ask you to sign in next time. (The browser's Microsoft sign-in stays – "
+          "sign out there too if the computer is shared.)",
+          "Utloggad från Microsoft Graph. Nästa gång frågar jag efter inloggning igen. (Webbläsarens Microsoft-inloggning "
+          "ligger kvar – logga ut där också om datorn delas.)"), "happy")
     return True
 
 
@@ -1539,62 +1650,62 @@ PICK = "EUPPA-PICK|"
 
 
 LOOKUPS = {
-    "user": (["User.Read.All"], "användare", r"""
+    "user": (["User.Read.All"], L("users", "användare"), r"""
 $s = $Q -replace '"', ''
 $u = 'users?$top=40&$count=true&$select=id,displayName,userPrincipalName,accountEnabled,userType,jobTitle'
 if ($s) { $u += '&$search=' + (Enc ('"displayName:{0}" OR "userPrincipalName:{0}" OR "mail:{0}"' -f $s)) }
 Graph $u -Eventual | ForEach-Object { Pick $_.userPrincipalName $_.displayName (($_.userPrincipalName, $_.jobTitle,
-    $(if ($_.userType -eq 'Guest') { 'gäst' }), $(if (-not $_.accountEnabled) { 'spärrad' }) | Where-Object { $_ }) -join ' · ') }
+    $(if ($_.userType -eq 'Guest') { T 'guest' 'gäst' }), $(if (-not $_.accountEnabled) { T 'blocked' 'spärrad' }) | Where-Object { $_ }) -join ' · ') }
 """),
-    "alluser": (["User.Read.All"], "användare", r"""
+    "alluser": (["User.Read.All"], L("users", "användare"), r"""
 Graph 'users?$top=999&$select=id,displayName,userPrincipalName,accountEnabled,userType,jobTitle,department' -All |
   Sort-Object displayName | ForEach-Object {
     $d = @($_.userPrincipalName, $_.jobTitle, $_.department) | Where-Object { $_ }
-    if ($_.userType -eq 'Guest') { $d += 'gäst' }
-    if (-not $_.accountEnabled) { $d += 'spärrad' }
+    if ($_.userType -eq 'Guest') { $d += (T 'guest' 'gäst') }
+    if (-not $_.accountEnabled) { $d += (T 'blocked' 'spärrad') }
     Pick $_.userPrincipalName $_.displayName ($d -join ' · ') }
 """),
-    "group": (["Group.Read.All"], "grupper", r"""
+    "group": (["Group.Read.All"], L("groups", "grupper"), r"""
 $s = $Q -replace '"', ''
 $u = 'groups?$top=40&$count=true&$select=id,displayName,mail,groupTypes,securityEnabled,mailEnabled'
 if ($s) { $u += '&$search=' + (Enc ('"displayName:{0}" OR "mail:{0}"' -f $s)) }
 Graph $u -Eventual | ForEach-Object { Pick $_.id $_.displayName ((@($_.mail, (GroupType $_)) | Where-Object { $_ }) -join ' · ') }
 """),
-    "device": (["Device.Read.All"], "enheter", r"""
+    "device": (["Device.Read.All"], L("devices", "enheter"), r"""
 $s = $Q -replace '"', ''
 $u = 'devices?$top=40&$count=true&$select=id,deviceId,displayName,operatingSystem,accountEnabled,approximateLastSignInDateTime'
 if ($s) { $u += '&$search=' + (Enc ('"displayName:{0}"' -f $s)) }
-Graph $u -Eventual | ForEach-Object { Pick $_.deviceId $_.displayName ("$($_.operatingSystem) · senast $(D $_.approximateLastSignInDateTime)" + $(if (-not $_.accountEnabled) { ' · inaktiverad' })) }
+Graph $u -Eventual | ForEach-Object { Pick $_.deviceId $_.displayName ("$($_.operatingSystem) · $(T 'last' 'senast') $(D $_.approximateLastSignInDateTime)" + $(if (-not $_.accountEnabled) { ' · ' + (T 'disabled' 'inaktiverad') })) }
 """),
-    "app": (["Application.Read.All"], "appregistreringar", r"""
+    "app": (["Application.Read.All"], L("app registrations", "appregistreringar"), r"""
 $s = $Q -replace '"', ''
 $u = 'applications?$top=40&$count=true&$select=id,appId,displayName,createdDateTime'
 if ($s) { $u += '&$search=' + (Enc ('"displayName:{0}"' -f $s)) }
-Graph $u -Eventual | ForEach-Object { Pick $_.appId $_.displayName ("$($_.appId) · skapad $(D $_.createdDateTime)") }
+Graph $u -Eventual | ForEach-Object { Pick $_.appId $_.displayName ("$($_.appId) · $(T 'created' 'skapad') $(D $_.createdDateTime)") }
 """),
-    "sp": (["Application.Read.All"], "företagsappar", r"""
+    "sp": (["Application.Read.All"], L("enterprise apps", "företagsappar"), r"""
 $s = $Q -replace '"', ''
 $u = 'servicePrincipals?$top=40&$count=true&$select=id,appId,displayName,servicePrincipalType,accountEnabled'
 if ($s) { $u += '&$search=' + (Enc ('"displayName:{0}"' -f $s)) }
 else { $u += '&$filter=' + (Enc "tags/any(t:t eq 'WindowsAzureActiveDirectoryIntegratedApp')") }
-Graph $u -Eventual | ForEach-Object { Pick $_.appId $_.displayName ("$($_.appId)" + $(if (-not $_.accountEnabled) { ' · avstängd' })) }
+Graph $u -Eventual | ForEach-Object { Pick $_.appId $_.displayName ("$($_.appId)" + $(if (-not $_.accountEnabled) { ' · ' + (T 'turned off' 'avstängd') })) }
 """),
-    "role": (["RoleManagement.Read.Directory"], "roller", r"""
+    "role": (["RoleManagement.Read.Directory"], L("roles", "roller"), r"""
 Graph 'roleManagement/directory/roleDefinitions?$select=id,displayName,description,isBuiltIn' -All | Sort-Object displayName |
   ForEach-Object { Pick $_.id $_.displayName $_.description }
 """),
-    "ca": (["Policy.Read.All"], "policyer", r"""
+    "ca": (["Policy.Read.All"], L("policies", "policyer"), r"""
 Graph 'identity/conditionalAccess/policies' | Sort-Object displayName | ForEach-Object {
   $l = switch ($_.state) { 'enabled' { 'på' } 'disabled' { 'av' } default { 'report-only' } }
   Pick $_.id $_.displayName $l }
 """),
-    "sku": (["Organization.Read.All"], "licenser", r"""
+    "sku": (["Organization.Read.All"], L("licenses", "licenser"), r"""
 Graph 'subscribedSkus' | Where-Object { $_.prepaidUnits.enabled -gt 0 } | Sort-Object skuPartNumber | ForEach-Object {
-  Pick $_.skuPartNumber $_.skuPartNumber ('{0} av {1} använda' -f $_.consumedUnits, $_.prepaidUnits.enabled) }
+  Pick $_.skuPartNumber $_.skuPartNumber ((T '{0} of {1} used' '{0} av {1} använda') -f $_.consumedUnits, $_.prepaidUnits.enabled) }
 """),
-    "deleted": (["User.Read.All"], "raderade användare", r"""
+    "deleted": (["User.Read.All"], L("deleted users", "raderade användare"), r"""
 Graph 'directory/deletedItems/microsoft.graph.user?$top=999&$select=id,displayName,userPrincipalName,deletedDateTime' -All |
-  ForEach-Object { Pick $_.id $_.displayName ("$($_.userPrincipalName) · raderad $(D $_.deletedDateTime)") }
+  ForEach-Object { Pick $_.id $_.displayName ("$($_.userPrincipalName) · $(T 'deleted' 'raderad') $(D $_.deletedDateTime)") }
 """),
 }
 LIST_ALL = {"alluser", "role", "ca", "sku", "deleted"}   # hämtas en gång per session och filtreras här i Euppa
@@ -1614,7 +1725,7 @@ def run_lookup(kind, t, query):
         items = LOOKUP_CACHE[key]
     else:
         q = "" if kind in LIST_ALL else query
-        ok, _, lines = run_ps(f"Söker {label}" + (f" ”{query}”" if q else ""), f"$Q = {psq(q)}\n{code}",
+        ok, _, lines = run_ps(L(f"Searching {label}", f"Söker {label}") + (f" ”{query}”" if q else ""), f"$Q = {psq(q)}\n{code}",
                               show_output=False)
         items = []
         for k, txt in lines:
@@ -1641,8 +1752,8 @@ def lookup_param(prm, t, default):
     chosen = []
     q_default = default
     while True:
-        what = prm["fraga"] + (" – fler" if many and chosen else "")
-        q = ask_text(what + (" (valfritt)" if prm["valfri"] else "") + " · skriv en del av namnet" +
+        what = pquestion(prm) + (L(" – more", " – fler") if many and chosen else "")
+        q = ask_text(what + (L(" (optional)", " (valfritt)") if prm["valfri"] else "") + " · skriv en del av namnet" +
                      (" (tomt = lista alla)" if kind in LIST_ALL and not prm["valfri"] else ""),
                      q_default, required=not prm["valfri"] and not chosen and kind not in LIST_ALL)
         q_default = ""
@@ -1654,13 +1765,13 @@ def lookup_param(prm, t, default):
             t, hits = run_lookup(kind, t, q)
             if hits is None:
                 if not q:
-                    raise Cancel("kunde inte söka")
-                out("    " + yellow(f"Kunde inte söka – använder ”{q}” som det är."))
+                    raise Cancel(L("could not search", "kunde inte söka"))
+                out("    " + yellow(L(f"Could not search – using “{q}” as it is.", f"Kunde inte söka – använder ”{q}” som det är.")))
                 vals = [q]
             elif not hits:
-                out("    " + yellow(f"Hittade inga {label} som matchar ”{q}”."))
-                v = choose([dict(label="Sök igen", value="__again")] +
-                           ([dict(label=f"Använd ”{q}” som det är", value=q)] if q else []), title="Vad vill du göra?")
+                out("    " + yellow(L(f"Found no {label} matching “{q}”.", f"Hittade inga {label} som matchar ”{q}”.")))
+                v = choose([dict(label=L("Search again", "Sök igen"), value="__again")] +
+                           ([dict(label=L(f"Use “{q}” as it is", f"Använd ”{q}” som det är"), value=q)] if q else []), title=L("What do you want to do?", "Vad vill du göra?"))
                 if v is None:
                     raise Cancel()
                 if v == "__again":
@@ -1672,24 +1783,24 @@ def lookup_param(prm, t, default):
                 vals = [h[0]]
                 out("    " + green("→ ") + bold(h[1]) + dim(f"  {h[0]}" if h[0] != h[1] else ""))
             elif many:
-                vals = pick_many(hits, f"{len(hits)} {label}" + (f" som matchar ”{q}”" if q else ""))
+                vals = pick_many(hits, f"{len(hits)} {label}" + (L(f" matching “{q}”", f" som matchar ”{q}”") if q else ""))
                 if not vals:
                     raise Cancel()
                 out("    " + green("→ ") + ", ".join(bold(LABELS.get(v, v)) for v in vals))
             else:
                 rows = [dict(label=h[1], hint=h[2] or h[0], value=h[0]) for h in hits[:300]]
-                rows += [("head", ""), dict(label="Sök igen…", value="__again", key="s")]
+                rows += [("head", ""), dict(label=L("Search again…", "Sök igen…"), value="__again", key="s")]
                 if q:
-                    rows.append(dict(label=f"Använd ”{q}” som det är", value="__raw", key="r"))
+                    rows.append(dict(label=L(f"Use “{q}” as it is", f"Använd ”{q}” som det är"), value="__raw", key="r"))
                 v = choose(rows, title=f"{len(hits)} {label}" + (f" matchar ”{q}”" if q else "") +
-                           (" – skriv för att filtrera" if len(hits) > 9 else ""))
+                           (L(" – type to filter", " – skriv för att filtrera") if len(hits) > 9 else ""))
                 if v is None:
                     raise Cancel()
                 if v == "__again":
                     continue
                 vals = [q if v == "__raw" else v]
         chosen += [v for v in vals if v not in chosen]
-        if not many or not confirm("Lägg till fler?", False):
+        if not many or not confirm(L("Add more?", "Lägg till fler?"), False):
             break
     return t, ",".join(chosen)
 
@@ -1699,11 +1810,11 @@ def cmd_lookup(kind, query, as_json, all_):
     if all_ and kind == "user":
         kind = "alluser"
     if kind not in LOOKUPS:
-        raise Cancel(f"okänt uppslag '{kind}' (finns: {', '.join(k for k in LOOKUPS if k != 'alluser')})")
+        raise Cancel(L(f"unknown lookup '{kind}' (available: {', '.join(k for k in LOOKUPS if k != 'alluser')})", f"okänt uppslag '{kind}' (finns: {', '.join(k for k in LOOKUPS if k != 'alluser')})"))
     t, hits = run_lookup(kind, active_tenant(), query or "")
     if hits is None:
         if as_json:
-            emit_json({"ok": False, "error": "kunde inte söka (inloggad?)", "items": []})
+            emit_json({"ok": False, "error": L("could not search (signed in?)", "kunde inte söka (inloggad?)"), "items": []})
         return False
     if as_json:
         emit_json({"ok": True, "tenant": (t or {}).get("name", ""),
@@ -1787,7 +1898,7 @@ foreach ($u in Users $Anvandare) {
     Namn = $x.displayName; UPN = $x.userPrincipalName; Epost = $x.mail; Titel = $x.jobTitle; Avdelning = $x.department
     Kontor = $x.officeLocation; Mobil = $x.mobilePhone; Foretag = $x.companyName; AnstallningsId = $x.employeeId; Chef = $chef
     Aktiv = JaNej $x.accountEnabled; Typ = $(if ($x.userType -eq 'Guest') { 'gäst' } else { 'medlem' })
-    Kalla = $(if ($x.onPremisesSyncEnabled) { "lokal AD (synk $(D $x.onPremisesLastSyncDateTime))" } else { 'molnet' })
+    Kalla = $(if ($x.onPremisesSyncEnabled) { (T "on-prem AD (sync $(D $x.onPremisesLastSyncDateTime))" "lokal AD (synk $(D $x.onPremisesLastSyncDateTime))") } else { 'molnet' })
     Plats = $x.usageLocation; Licenser = $lic; Grupper = $grp; Skapad = D $x.createdDateTime
     LosenordBytt = D $x.lastPasswordChangeDateTime; SenastInloggad = D $x.signInActivity.lastSignInDateTime }
 }
@@ -1835,11 +1946,11 @@ $map = @{ 'Visningsnamn' = 'displayName'; 'Förnamn' = 'givenName'; 'Efternamn' 
   'Avdelning' = 'department'; 'Kontor' = 'officeLocation'; 'Mobil' = 'mobilePhone'; 'Företag' = 'companyName'
   'Anställnings-id' = 'employeeId'; 'Användningsplats' = 'usageLocation' }
 $prop = $map[$Falt]
-if (-not $prop) { throw "Okänt fält: $Falt" }
+if (-not $prop) { throw (T "Unknown field: $Falt" "Okänt fält: $Falt") }
 $v = $null
 if ($Varde) { $v = $Varde }
 foreach ($u in Users $Anvandare) {
-  try { Graph "users/$($u.id)" -Method PATCH -Body @{ $prop = $v } | Out-Null; Done $u.userPrincipalName "$Falt = $(if ($v) { $v } else { '(tomt)' })" }
+  try { Graph "users/$($u.id)" -Method PATCH -Body @{ $prop = $v } | Out-Null; Done $u.userPrincipalName "$Falt = $(if ($v) { $v } else { T '(empty)' '(tomt)' })" }
   catch { Fail $u.userPrincipalName $_ }
 }
 """),
@@ -1920,8 +2031,8 @@ foreach ($u in Users $Anvandare) {
     if (-not $left.Count) { break }
   }
   try { Graph "users/$($u.id)/revokeSignInSessions" -Method POST | Out-Null } catch { }
-  if ($left.Count) { Fail $u.userPrincipalName ("$n borttagna, kvar: " + ($left -join '; ')) }
-  else { Done $u.userPrincipalName "$n metoder borttagna och utloggad – registrerar MFA igen vid nästa inloggning" }
+  if ($left.Count) { Fail $u.userPrincipalName ((T "$n removed, left: " "$n borttagna, kvar: ") + ($left -join '; ')) }
+  else { Done $u.userPrincipalName (T "$n methods removed and signed out – registers MFA again at next sign-in" "$n metoder borttagna och utloggad – registrerar MFA igen vid nästa inloggning") }
 }
 """),
     act("anvandare-tap", "Tillfälligt lösenord (TAP)", "Användare", "ändrar", "UserAuthenticationMethod.ReadWrite.All User.Read.All",
@@ -1954,7 +2065,7 @@ foreach ($u in Users $Anvandare) {
   try {
     if (-not $u.usageLocation) { Graph "users/$($u.id)" -Method PATCH -Body @{ usageLocation = $Plats.ToUpper() } | Out-Null }
     Graph "users/$($u.id)/assignLicense" -Method POST -Body @{ addLicenses = @(@{ skuId = $sku.skuId; disabledPlans = @() }); removeLicenses = @() } | Out-Null
-    Done $u.userPrincipalName "fick $($sku.skuPartNumber)"
+    Done $u.userPrincipalName (T "got $($sku.skuPartNumber)" "fick $($sku.skuPartNumber)")
   } catch { Fail $u.userPrincipalName $_ }
 }
 """),
@@ -1965,17 +2076,17 @@ $sku = Sku $Licens
 foreach ($u in Users $Anvandare) {
   try {
     Graph "users/$($u.id)/assignLicense" -Method POST -Body @{ addLicenses = @(); removeLicenses = @($sku.skuId) } | Out-Null
-    Done $u.userPrincipalName "$($sku.skuPartNumber) borttagen"
+    Done $u.userPrincipalName (T "$($sku.skuPartNumber) removed" "$($sku.skuPartNumber) borttagen")
   } catch { Fail $u.userPrincipalName $_ }
 }
 """),
     act("anvandare-chef", "Sätt chef", "Användare", "ändrar", "User.ReadWrite.All",
         "Sätter chefen (manager) för en eller flera användare.", [U, "Chef | Vem är chef? | | @user"], r"""
 $c = @(Users $Chef)[0]
-if (-not $c) { throw "Hittar ingen chef '$Chef'." }
+if (-not $c) { throw (T "Can't find a manager '$Chef'." "Hittar ingen chef '$Chef'.") }
 foreach ($u in Users $Anvandare) {
   try { Graph ('users/' + $u.id + '/manager/$ref') -Method PUT -Body @{ '@odata.id' = "https://graph.microsoft.com/v1.0/users/$($c.id)" } | Out-Null
-        Done $u.userPrincipalName "chef: $($c.displayName)" }
+        Done $u.userPrincipalName (T "manager: $($c.displayName)" "chef: $($c.displayName)") }
   catch { Fail $u.userPrincipalName $_ }
 }
 """),
@@ -2056,7 +2167,7 @@ foreach ($e in Items $Epost) {
   if ($Namn -and @(Items $Epost).Count -eq 1) { $b.invitedUserDisplayName = $Namn }
   if ($Meddelande) { $b.invitedUserMessageInfo = @{ customizedMessageBody = $Meddelande } }
   try { $r = Graph 'invitations' -Method POST -Body $b
-        [pscustomobject][ordered]@{ Objekt = $e; Resultat = "inbjuden ($($r.status))"; Lank = $r.inviteRedeemUrl; Id = $r.invitedUser.id } }
+        [pscustomobject][ordered]@{ Objekt = $e; Resultat = (T "invited ($($r.status))" "inbjuden ($($r.status))"); Lank = $r.inviteRedeemUrl; Id = $r.invitedUser.id } }
   catch { Fail $e $_ }
 }
 """),
@@ -2122,8 +2233,8 @@ $g = Graph 'groups' -Method POST -Body $b
 $us = @(Users $Anvandare)
 foreach ($g in Groups $Grupp) {
   foreach ($u in $us) {
-    try { Graph ("groups/$($g.id)/members/" + '$ref') -Method POST -Body (Ref $u.id) | Out-Null; Done $u.userPrincipalName "tillagd i $($g.displayName)" }
-    catch { if ((Msg $_) -match 'already exist') { Done $u.userPrincipalName "redan med i $($g.displayName)" } else { Fail $u.userPrincipalName $_ } }
+    try { Graph ("groups/$($g.id)/members/" + '$ref') -Method POST -Body (Ref $u.id) | Out-Null; Done $u.userPrincipalName (T "added to $($g.displayName)" "tillagd i $($g.displayName)") }
+    catch { if ((Msg $_) -match 'already exist') { Done $u.userPrincipalName (T "already in $($g.displayName)" "redan med i $($g.displayName)") } else { Fail $u.userPrincipalName $_ } }
   }
 }
 """),
@@ -2132,8 +2243,8 @@ foreach ($g in Groups $Grupp) {
 $us = @(Users $Anvandare)
 foreach ($g in Groups $Grupp) {
   foreach ($u in $us) {
-    try { Graph ("groups/$($g.id)/members/$($u.id)/" + '$ref') -Method DELETE | Out-Null; Done $u.userPrincipalName "borttagen ur $($g.displayName)" }
-    catch { if ((Msg $_) -match 'does not exist|ResourceNotFound') { Done $u.userPrincipalName "var inte med i $($g.displayName)" } else { Fail $u.userPrincipalName $_ } }
+    try { Graph ("groups/$($g.id)/members/$($u.id)/" + '$ref') -Method DELETE | Out-Null; Done $u.userPrincipalName (T "removed from $($g.displayName)" "borttagen ur $($g.displayName)") }
+    catch { if ((Msg $_) -match 'does not exist|ResourceNotFound') { Done $u.userPrincipalName (T "wasn't in $($g.displayName)" "var inte med i $($g.displayName)") } else { Fail $u.userPrincipalName $_ } }
   }
 }
 """),
@@ -2142,8 +2253,8 @@ foreach ($g in Groups $Grupp) {
 $us = @(Users $Anvandare)
 foreach ($g in Groups $Grupp) {
   foreach ($u in $us) {
-    try { Graph ("groups/$($g.id)/owners/" + '$ref') -Method POST -Body (Ref $u.id) | Out-Null; Done $u.userPrincipalName "ägare av $($g.displayName)" }
-    catch { if ((Msg $_) -match 'already exist') { Done $u.userPrincipalName "redan ägare av $($g.displayName)" } else { Fail $u.userPrincipalName $_ } }
+    try { Graph ("groups/$($g.id)/owners/" + '$ref') -Method POST -Body (Ref $u.id) | Out-Null; Done $u.userPrincipalName (T "owner of $($g.displayName)" "ägare av $($g.displayName)") }
+    catch { if ((Msg $_) -match 'already exist') { Done $u.userPrincipalName (T "already owner of $($g.displayName)" "redan ägare av $($g.displayName)") } else { Fail $u.userPrincipalName $_ } }
   }
 }
 """),
@@ -2153,7 +2264,7 @@ foreach ($g in Groups $Grupp) {
 $us = @(Users $Anvandare)
 foreach ($g in Groups $Grupp) {
   foreach ($u in $us) {
-    try { Graph ("groups/$($g.id)/owners/$($u.id)/" + '$ref') -Method DELETE | Out-Null; Done $u.userPrincipalName "inte längre ägare av $($g.displayName)" }
+    try { Graph ("groups/$($g.id)/owners/$($u.id)/" + '$ref') -Method DELETE | Out-Null; Done $u.userPrincipalName (T "no longer owner of $($g.displayName)" "inte längre ägare av $($g.displayName)") }
     catch { Fail $u.userPrincipalName $_ }
   }
 }
@@ -2167,7 +2278,7 @@ foreach ($g in Groups $Grupp) {
   try {
     Graph "groups/$($g.id)" -Method PATCH -Body @{ groupTypes = $types; membershipRule = $Regel
       membershipRuleProcessingState = $(if ($Lage -eq 'Pausad') { 'Paused' } else { 'On' }) } | Out-Null
-    Done $g.displayName "dynamisk ($Lage): $Regel"
+    Done $g.displayName (T "dynamic ($Lage): $Regel" "dynamisk ($Lage): $Regel")
   } catch { Fail $g.displayName $_ }
 }
 """),
@@ -2306,7 +2417,7 @@ foreach ($a in Apps $App) {
   try {
     $r = Graph "applications/$($a.id)/addPassword" -Method POST -Body @{ passwordCredential = @{ displayName = $Namn
       endDateTime = (Get-Date).ToUniversalTime().AddMonths([int]$Manader).ToString('yyyy-MM-ddTHH:mm:ssZ') } }
-    Write-Warning 'Kopiera hemligheten nu – den går inte att visa igen.'
+    Write-Warning (T 'Copy the secret now – it can never be shown again.' 'Kopiera hemligheten nu – den går inte att visa igen.')
     [pscustomobject][ordered]@{ App = $a.displayName; AppId = $a.appId; Namn = $r.displayName; Hemlighet = $r.secretText; GarUt = D $r.endDateTime; KeyId = $r.keyId }
   } catch { Fail $a.displayName $_ }
 }
@@ -2317,7 +2428,7 @@ foreach ($a in Apps $App) {
   $old = @($a.passwordCredentials | Where-Object { $_.endDateTime -and [datetime]$_.endDateTime -lt (Get-Date) })
   if (-not $old.Count) { Done $a.displayName 'inga utgångna hemligheter'; continue }
   foreach ($k in $old) {
-    try { Graph "applications/$($a.id)/removePassword" -Method POST -Body @{ keyId = $k.keyId } | Out-Null; Done $a.displayName "tog bort '$($k.displayName)' (gick ut $(D $k.endDateTime))" }
+    try { Graph "applications/$($a.id)/removePassword" -Method POST -Body @{ keyId = $k.keyId } | Out-Null; Done $a.displayName (T "removed '$($k.displayName)' (expired $(D $k.endDateTime))" "tog bort '$($k.displayName)' (gick ut $(D $k.endDateTime))") }
     catch { Fail $a.displayName $_ }
   }
 }
@@ -2360,7 +2471,7 @@ foreach ($a in Apps $App) {
   if (-not $sp) { $sp = Graph 'servicePrincipals' -Method POST -Body @{ appId = $a.appId }; Done $a.displayName 'skapade företagsappen' }
   foreach ($rra in @($a.requiredResourceAccess)) {
     $res = SpByAppId $rra.resourceAppId
-    if (-not $res) { Fail $a.displayName "resursen $($rra.resourceAppId) finns inte i tenanten"; continue }
+    if (-not $res) { Fail $a.displayName (T "the resource $($rra.resourceAppId) doesn't exist in the tenant" "resursen $($rra.resourceAppId) finns inte i tenanten"); continue }
     $want = @($rra.resourceAccess | Where-Object type -eq 'Scope' | ForEach-Object { $id = $_.id; @($res.oauth2PermissionScopes | Where-Object id -eq $id)[0].value } | Where-Object { $_ })
     if ($want.Count) {
       $g = @(Graph ('oauth2PermissionGrants?$filter=' + (Enc "clientId eq '$($sp.id)' and consentType eq 'AllPrincipals' and resourceId eq '$($res.id)'")))[0]
@@ -2368,15 +2479,15 @@ foreach ($a in Apps $App) {
         if ($g) { $all = @(("$($g.scope)".Split(' ', [StringSplitOptions]::RemoveEmptyEntries) + $want) | Select-Object -Unique)
                   Graph "oauth2PermissionGrants/$($g.id)" -Method PATCH -Body @{ scope = ($all -join ' ') } | Out-Null }
         else { Graph 'oauth2PermissionGrants' -Method POST -Body @{ clientId = $sp.id; consentType = 'AllPrincipals'; resourceId = $res.id; scope = ($want -join ' ') } | Out-Null }
-        Done $a.displayName "$($res.displayName) (delegerad): $($want -join ', ')"
+        Done $a.displayName (T "$($res.displayName) (delegated): $($want -join ', ')" "$($res.displayName) (delegerad): $($want -join ', ')")
       } catch { Fail $a.displayName $_ }
     }
     $have = @(Graph "servicePrincipals/$($sp.id)/appRoleAssignments" -All | ForEach-Object { "$($_.resourceId)|$($_.appRoleId)" })
     foreach ($ra in @($rra.resourceAccess | Where-Object type -eq 'Role')) {
       $rv = @($res.appRoles | Where-Object id -eq $ra.id)[0].value
-      if ($have -contains "$($res.id)|$($ra.id)") { Done $a.displayName "$($res.displayName) (program): $rv – fanns redan"; continue }
+      if ($have -contains "$($res.id)|$($ra.id)") { Done $a.displayName (T "$($res.displayName) (application): $rv – already there" "$($res.displayName) (program): $rv – fanns redan"); continue }
       try { Graph "servicePrincipals/$($res.id)/appRoleAssignedTo" -Method POST -Body @{ principalId = $sp.id; resourceId = $res.id; appRoleId = $ra.id } | Out-Null
-            Done $a.displayName "$($res.displayName) (program): $rv" }
+            Done $a.displayName (T "$($res.displayName) (application): $rv" "$($res.displayName) (program): $rv") }
       catch { Fail $a.displayName $_ }
     }
   }
@@ -2389,12 +2500,12 @@ foreach ($a in Apps $App) {
 foreach ($sp in Sps $Fapp) {
   if ($Vad -ne 'Program') {
     foreach ($g in @(Graph ('oauth2PermissionGrants?$filter=' + (Enc "clientId eq '$($sp.id)'")) -All)) {
-      try { Graph "oauth2PermissionGrants/$($g.id)" -Method DELETE | Out-Null; Done $sp.displayName "återkallade delegerat: $("$($g.scope)".Trim())" } catch { Fail $sp.displayName $_ }
+      try { Graph "oauth2PermissionGrants/$($g.id)" -Method DELETE | Out-Null; Done $sp.displayName (T "revoked delegated: $("$($g.scope)".Trim())" "återkallade delegerat: $("$($g.scope)".Trim())") } catch { Fail $sp.displayName $_ }
     }
   }
   if ($Vad -ne 'Delegerade') {
     foreach ($r in @(Graph "servicePrincipals/$($sp.id)/appRoleAssignments" -All)) {
-      try { Graph "servicePrincipals/$($sp.id)/appRoleAssignments/$($r.id)" -Method DELETE | Out-Null; Done $sp.displayName "återkallade program: $($r.resourceDisplayName)" } catch { Fail $sp.displayName $_ }
+      try { Graph "servicePrincipals/$($sp.id)/appRoleAssignments/$($r.id)" -Method DELETE | Out-Null; Done $sp.displayName (T "revoked application: $($r.resourceDisplayName)" "återkallade program: $($r.resourceDisplayName)") } catch { Fail $sp.displayName $_ }
     }
   }
 }
@@ -2423,7 +2534,7 @@ foreach ($u in Users $Anvandare) {
     [pscustomobject][ordered]@{ Anvandare = $u.userPrincipalName; Roll = $defs[$_.roleDefinitionId]; Status = 'aktiv'; Till = '' } }
   try { Graph ('roleManagement/directory/roleEligibilitySchedules?$filter=' + (Enc "principalId eq '$($u.id)'")) -All | ForEach-Object {
     [pscustomobject][ordered]@{ Anvandare = $u.userPrincipalName; Roll = $defs[$_.roleDefinitionId]; Status = 'berättigad (PIM)'; Till = $(if ($_.scheduleInfo.expiration.endDateTime) { D $_.scheduleInfo.expiration.endDateTime } else { 'tills vidare' }) } } }
-  catch { Write-Warning "PIM gick inte att läsa (kräver Entra ID P2): $(Msg $_)" }
+  catch { Write-Warning (T "Could not read PIM (needs Entra ID P2): $(Msg $_)" "PIM gick inte att läsa (kräver Entra ID P2): $(Msg $_)") }
 }
 """),
     act("pim-berattigade", "Berättigade roller (PIM)", "Roller och PIM", "läs", "RoleManagement.Read.Directory",
@@ -2451,14 +2562,14 @@ foreach ($u in Users $Anvandare) {
     if ($Typ -like 'Berättigad*') {
       Graph 'roleManagement/directory/roleEligibilityScheduleRequests' -Method POST -Body @{ action = 'adminAssign'; justification = $Motivering
         roleDefinitionId = $r.id; directoryScopeId = '/'; principalId = $u.id; scheduleInfo = @{ startDateTime = $start; expiration = $exp } } | Out-Null
-      Done $u.userPrincipalName "berättigad till $($r.displayName)"
+      Done $u.userPrincipalName (T "eligible for $($r.displayName)" "berättigad till $($r.displayName)")
     } elseif ([int]$Dagar -gt 0) {
       Graph 'roleManagement/directory/roleAssignmentScheduleRequests' -Method POST -Body @{ action = 'adminAssign'; justification = $Motivering
         roleDefinitionId = $r.id; directoryScopeId = '/'; principalId = $u.id; scheduleInfo = @{ startDateTime = $start; expiration = $exp } } | Out-Null
-      Done $u.userPrincipalName "aktiv $($r.displayName) i $Dagar dagar"
+      Done $u.userPrincipalName (T "active $($r.displayName) for $Dagar days" "aktiv $($r.displayName) i $Dagar dagar")
     } else {
       Graph 'roleManagement/directory/roleAssignments' -Method POST -Body @{ principalId = $u.id; roleDefinitionId = $r.id; directoryScopeId = '/' } | Out-Null
-      Done $u.userPrincipalName "permanent $($r.displayName)"
+      Done $u.userPrincipalName (T "permanent $($r.displayName)" "permanent $($r.displayName)")
     }
   } catch { Fail $u.userPrincipalName $_ }
 }
@@ -2483,7 +2594,7 @@ foreach ($u in Users $Anvandare) {
       Graph 'roleManagement/directory/roleEligibilityScheduleRequests' -Method POST -Body @{ action = 'adminRemove'; principalId = $u.id; roleDefinitionId = $r.id; directoryScopeId = $x.directoryScopeId; justification = $Motivering } | Out-Null; $n++
     }
   } catch { if ((Msg $_) -notmatch 'P2|license|Premium') { Fail $u.userPrincipalName $_ } }
-  Done $u.userPrincipalName $(if ($n) { "$($r.displayName) borttagen ($n tilldelningar)" } else { "hade inte $($r.displayName)" })
+  Done $u.userPrincipalName $(if ($n) { T "$($r.displayName) removed ($n assignments)" "$($r.displayName) borttagen ($n tilldelningar)" } else { T "didn't have $($r.displayName)" "hade inte $($r.displayName)" })
 }
 """),
     act("pim-aktivera", "Aktivera min roll (PIM)", "Roller och PIM", "ändrar", "RoleAssignmentSchedule.ReadWrite.Directory RoleManagement.Read.Directory",
@@ -2508,7 +2619,7 @@ function sum($inc, $exc) {
 }
 Graph 'identity/conditionalAccess/policies' | Sort-Object displayName | ForEach-Object {
   $c = $_.conditions; $g = $_.grantControls
-  $krav = @($g.builtInControls) + @($(if ($g.authenticationStrength) { "styrka: $($g.authenticationStrength.displayName)" }))
+  $krav = @($g.builtInControls) + @($(if ($g.authenticationStrength) { (T "strength: $($g.authenticationStrength.displayName)" "styrka: $($g.authenticationStrength.displayName)") }))
   [pscustomobject][ordered]@{ Namn = $_.displayName; Lage = $(switch ($_.state) { 'enabled' { 'på' } 'disabled' { 'av' } default { 'report-only' } })
     Anvandare = sum $c.users.includeUsers; Grupper = @($c.users.includeGroups).Count; Roller = @($c.users.includeRoles).Count
     Undantag = @($c.users.excludeUsers).Count + @($c.users.excludeGroups).Count + @($c.users.excludeRoles).Count
@@ -2545,10 +2656,10 @@ foreach ($p in CaPolicies $Policy) {
     'Plattformar' = ((@($c.platforms.includePlatforms) -join ', ') + $(if (@($c.platforms.excludePlatforms).Count) { ' utom ' + (@($c.platforms.excludePlatforms) -join ', ') }))
     'Platser – gäller' = locnames $c.locations.includeLocations; 'Platser – undantag' = locnames $c.locations.excludeLocations
     'Klientappar' = (@($c.clientAppTypes) -join ', '); 'Inloggningsrisk' = (@($c.signInRiskLevels) -join ', '); 'Användarrisk' = (@($c.userRiskLevels) -join ', ')
-    'Krav' = ((@($g.builtInControls) + @($(if ($g.authenticationStrength) { "autentiseringsstyrka: $($g.authenticationStrength.displayName)" })) | Where-Object { $_ }) -join " $($g.operator) ")
-    'Session' = ((@($(if ($s.signInFrequency.isEnabled) { "logga in var $($s.signInFrequency.value) $($s.signInFrequency.type)" }),
-                   $(if ($s.persistentBrowser.isEnabled) { "beständig webbläsare: $($s.persistentBrowser.mode)" }),
-                   $(if ($s.applicationEnforcedRestrictions.isEnabled) { 'appstyrda begränsningar' })) | Where-Object { $_ }) -join ', ')
+    'Krav' = ((@($g.builtInControls) + @($(if ($g.authenticationStrength) { (T "authentication strength: $($g.authenticationStrength.displayName)" "autentiseringsstyrka: $($g.authenticationStrength.displayName)") })) | Where-Object { $_ }) -join " $($g.operator) ")
+    'Session' = ((@($(if ($s.signInFrequency.isEnabled) { (T "sign in every $($s.signInFrequency.value) $($s.signInFrequency.type)" "logga in var $($s.signInFrequency.value) $($s.signInFrequency.type)") }),
+                   $(if ($s.persistentBrowser.isEnabled) { (T "persistent browser: $($s.persistentBrowser.mode)" "beständig webbläsare: $($s.persistentBrowser.mode)") }),
+                   $(if ($s.applicationEnforcedRestrictions.isEnabled) { (T 'app enforced restrictions' 'appstyrda begränsningar') })) | Where-Object { $_ }) -join ', ')
     'Ändrad' = D $p.modifiedDateTime }
   foreach ($k in $rows.Keys) { if ("$($rows[$k])".Trim()) { [pscustomobject][ordered]@{ Policy = $p.displayName; Del = $k; Varde = $rows[$k] } } }
 }
@@ -2559,7 +2670,7 @@ foreach ($p in CaPolicies $Policy) {
         ["Policy | Vilka policyer? | | @ca+", "Lage | Nytt läge | Report-only | Report-only, På, Av"], r"""
 $st = @{ 'Report-only' = 'enabledForReportingButNotEnforced'; 'På' = 'enabled'; 'Av' = 'disabled' }[$Lage]
 foreach ($p in CaPolicies $Policy) {
-  try { Graph "identity/conditionalAccess/policies/$($p.id)" -Method PATCH -Body @{ state = $st } | Out-Null; Done $p.displayName "läge: $Lage" } catch { Fail $p.displayName $_ }
+  try { Graph "identity/conditionalAccess/policies/$($p.id)" -Method PATCH -Body @{ state = $st } | Out-Null; Done $p.displayName (T "state: $Lage" "läge: $Lage") } catch { Fail $p.displayName $_ }
 }
 """),
     act("ca-undanta", "Undanta användare från policy", "Villkorlig åtkomst", "ändrar",
@@ -2570,7 +2681,7 @@ $ids = @(Users $Anvandare | ForEach-Object { $_.id })
 foreach ($p in CaPolicies $Policy) {
   $c = $p.conditions
   $c.users.excludeUsers = @(@($c.users.excludeUsers) + $ids | Where-Object { $_ } | Select-Object -Unique)
-  try { Graph "identity/conditionalAccess/policies/$($p.id)" -Method PATCH -Body @{ conditions = $c } | Out-Null; Done $p.displayName "$($ids.Count) undantagna" }
+  try { Graph "identity/conditionalAccess/policies/$($p.id)" -Method PATCH -Body @{ conditions = $c } | Out-Null; Done $p.displayName (T "$($ids.Count) excluded" "$($ids.Count) undantagna") }
   catch { Fail $p.displayName $_ }
 }
 """),
@@ -2605,7 +2716,7 @@ if ($BaraFel -eq 'Ja') { $f += ' and status/errorCode ne 0' }
 Graph ('auditLogs/signIns?$top=999&$filter=' + (Enc $f)) | ForEach-Object { [pscustomobject][ordered]@{
   Tid = D $_.createdDateTime; Anvandare = $_.userPrincipalName; App = $_.appDisplayName; IP = $_.ipAddress
   Plats = ((@($_.location.city, $_.location.countryOrRegion) | Where-Object { $_ }) -join ', ')
-  Resultat = $(if ($_.status.errorCode -eq 0) { 'OK' } else { "fel $($_.status.errorCode): $($_.status.failureReason)" })
+  Resultat = $(if ($_.status.errorCode -eq 0) { 'OK' } else { (T "error $($_.status.errorCode): $($_.status.failureReason)" "fel $($_.status.errorCode): $($_.status.failureReason)") })
   VillkorligAtkomst = $(switch ($_.conditionalAccessStatus) { 'success' { 'godkänd' } 'failure' { 'nekad' } 'notApplied' { 'ej tillämpad' } default { $_ } })
   Klient = $_.clientAppUsed; Enhet = "$($_.deviceDetail.operatingSystem) $($_.deviceDetail.browser)".Trim() } }
 """),
@@ -2697,7 +2808,7 @@ $o = @(Graph 'organization')[0]
 $sd = $null; try { $sd = (Graph 'policies/identitySecurityDefaultsEnforcementPolicy').isEnabled } catch { }
 $rows = [ordered]@{ 'Namn' = $o.displayName; 'Tenant-ID' = $o.id; 'Land' = $o.countryLetterCode; 'Skapad' = D $o.createdDateTime
   'Standarddomän' = ($o.verifiedDomains | Where-Object isDefault).name; 'Initial domän' = ($o.verifiedDomains | Where-Object isInitial).name
-  'Katalogsynk (AD Connect)' = $(if ($o.onPremisesSyncEnabled) { "på, senast $(D $o.onPremisesLastSyncDateTime)" } else { 'av' })
+  'Katalogsynk (AD Connect)' = $(if ($o.onPremisesSyncEnabled) { (T "on, last $(D $o.onPremisesLastSyncDateTime)" "på, senast $(D $o.onPremisesLastSyncDateTime)") } else { 'av' })
   'Säkerhetsstandarder' = $(if ($null -eq $sd) { 'okänt' } else { JaNej $sd })
   'Tekniska kontakter' = (@($o.technicalNotificationMails) -join ', '); 'Integritetskontakt' = $o.privacyProfile.contactEmail }
 foreach ($k in $rows.Keys) { [pscustomobject][ordered]@{ Installning = $k; Varde = $rows[$k] } }
@@ -2742,7 +2853,7 @@ switch ($Installning) {
     Graph 'policies/authorizationPolicy' -Method PATCH -Body @{ defaultUserRolePermissions = @{ permissionGrantPoliciesAssigned = @($keep) } } | Out-Null }
   'Säkerhetsstandarder' { Graph 'policies/identitySecurityDefaultsEnforcementPolicy' -Method PATCH -Body @{ isEnabled = $on } | Out-Null }
   'Blockera MSOnline PowerShell' { Graph 'policies/authorizationPolicy' -Method PATCH -Body @{ blockMsolPowerShell = $on } | Out-Null }
-  default { throw "Okänd inställning: $Installning" }
+  default { throw (T "Unknown setting: $Installning" "Okänd inställning: $Installning") }
 }
 Done $Installning $(if ($on) { 'ja' } else { 'nej' })
 """),
@@ -2750,7 +2861,7 @@ Done $Installning $(if ($on) { 'ja' } else { 'nej' })
     act("lokalt-session", "Min inloggning", "Lokalt", "lokal", "",
         "Vem du är inloggad som, i vilken tenant och med vilka scopes.", [], r"""
 $c = Get-MgContext
-if (-not $c) { Write-Warning 'Inte inloggad i Microsoft Graph än.'; return }
+if (-not $c) { Write-Warning (T 'Not signed in to Microsoft Graph yet.' 'Inte inloggad i Microsoft Graph än.'); return }
 [pscustomobject][ordered]@{ Konto = $c.Account; Tenant = $c.TenantId; Inloggning = "$($c.AuthType) $($c.TokenCredentialType)".Trim()
   Sparas = "$($c.ContextScope)"; Scopes = ((@($c.Scopes) | Sort-Object) -join ', ') }
 """),
@@ -2765,24 +2876,312 @@ foreach ($m in 'Microsoft.Graph.Authentication', 'ImportExcel') {
 ]
 
 
+# ───────────────────────────── English ─────────────────────────────
+# The catalogue above is written in Swedish (PowerShell compares against those values). Here every area, action,
+# field and choice gets its English text. English ids and field names are canonical; the Swedish ones remain aliases.
+AREAS_EN = {"Användare": ("Users", "Create, edit, block, passwords, MFA, licenses and manager"),
+            "Gäster": ("Guests", "Invite, check status and clean up external users"),
+            "Grupper": ("Groups", "Create, members, owners and dynamic rules"),
+            "Enheter": ("Devices", "List, disable, BitLocker keys and LAPS"),
+            "Appar": ("Apps", "App registrations and enterprise apps: secrets, permissions, consent"),
+            "Roller och PIM": ("Roles and PIM", "Admin roles, eligible and active assignments"),
+            "Villkorlig åtkomst": ("Conditional Access", "Policies, report-only, exclusions and named locations"),
+            "Loggar": ("Logs", "Sign-ins and the audit log"),
+            "Säkerhet": ("Security", "Risky users, risk detections and MFA status"),
+            "Tenant": ("Tenant", "Licenses, domains, organisation info and settings"),
+            "Lokalt": ("Local", "The session and the modules on this computer")}
+for _ar in AREAS:
+    _ar["name"], _ar["desc"] = AREAS_EN[_ar["namn"]]
+
+# field (Swedish PowerShell variable) -> English name on the command line
+PARAM_EN = {"Anvandare": "Users", "Sok": "Search", "Dagar": "Days", "Typ": "Type", "Namn": "Name", "Anvandarnamn": "Username",
+            "Doman": "Domain", "Losenord": "Password", "Titel": "Title", "Avdelning": "Department", "Plats": "UsageLocation",
+            "Byt": "ChangeAtSignIn", "Falt": "Field", "Varde": "Value", "Minuter": "Minutes", "Engang": "OneTime",
+            "Licens": "License", "Chef": "Manager", "Raderad": "Deleted", "Epost": "Email", "Skicka": "SendEmail",
+            "Lank": "RedirectUrl", "Meddelande": "Message", "Grupp": "Group", "Alla": "All", "Beskrivning": "Description",
+            "Agare": "Owners", "Medlemmar": "Members", "Regel": "Rule", "Lage": "State", "Enhet": "Device", "App": "App",
+            "Manader": "Months", "Fapp": "EnterpriseApp", "Vad": "What", "Roll": "Role", "Motivering": "Justification",
+            "Timmar": "Hours", "Policy": "Policy", "Varden": "Values", "Betrodd": "Trusted", "BaraFel": "FailuresOnly",
+            "BaraUtan": "WithoutMfaOnly", "Installning": "Setting"}
+# choices (Swedish canonical value) -> English label
+CHOICE_EN = {"Ja": "Yes", "Nej": "No", "Alla": "All", "Medlemmar": "Members", "Gäster": "Guests", "Visningsnamn": "Display name",
+             "Förnamn": "First name", "Efternamn": "Last name", "Titel": "Job title", "Avdelning": "Department",
+             "Kontor": "Office", "Mobil": "Mobile", "Företag": "Company", "Anställnings-id": "Employee ID",
+             "Användningsplats": "Usage location", "Säkerhet": "Security", "Microsoft 365": "Microsoft 365", "På": "On",
+             "Pausad": "Paused", "Av": "Off", "Båda": "Both", "Delegerade": "Delegated", "Program": "Application",
+             "Berättigad (PIM)": "Eligible (PIM)", "Aktiv": "Active", "Report-only": "Report-only", "IP-intervall": "IP ranges",
+             "Länder": "Countries", "Användare får registrera appar": "Users can register apps",
+             "Användare får skapa säkerhetsgrupper": "Users can create security groups",
+             "Användare får skapa tenants": "Users can create tenants", "Medlemmar får bjuda in gäster": "Members can invite guests",
+             "Användarsamtycke till appar (låg risk)": "User consent to apps (low risk)",
+             "Säkerhetsstandarder": "Security defaults", "Blockera MSOnline PowerShell": "Block MSOnline PowerShell"}
+DEFAULT_EN = {"Tilldelad med Euppa": "Assigned with Euppa", "Borttagen med Euppa": "Removed with Euppa",
+              '(user.department -eq "Sälj")': '(user.department -eq "Sales")'}
+U_EN = ("Users", "Which users?")
+# id -> (English id, name, description, {field: question})
+ACTIONS_EN = {
+    "anvandare-lista": ("users-list", "List users", "Every user with status, type, title, department and number of licenses.",
+                        {"Sok": "Filter (name, email, title, department)"}),
+    "anvandare-info": ("users-info", "User info", "Everything about one or more users: contact, manager, status, sync, licenses, groups and last sign-in.", {}),
+    "anvandare-inaktiva": ("users-inactive", "Inactive users", "Accounts that haven't signed in for X days (or ever). Needs Entra ID P1 for sign-in dates.",
+                           {"Dagar": "No sign-in for how many days?", "Typ": "Which?"}),
+    "anvandare-skapa": ("users-create", "Create user", "New cloud user. Leave the password empty and Euppa makes up a strong one and shows it once.",
+                        {"Namn": "Display name (e.g. Anna Smith)", "Anvandarnamn": "Username before @ (empty = firstname.lastname)",
+                         "Doman": "Domain", "Losenord": "Password (empty = a new, strong one)", "Titel": "Job title",
+                         "Avdelning": "Department", "Plats": "Usage location (country code, needed for licenses)",
+                         "Byt": "Change password at first sign-in?"}),
+    "anvandare-andra": ("users-edit", "Edit user field", "Set job title, department, office, mobile, company etc. on one or more users. An empty value clears the field.",
+                        {"Falt": "Which field?", "Varde": "New value (empty = clear)"}),
+    "anvandare-sparra": ("users-block", "Block and sign out", "Blocks sign-in and revokes every session (token) right away. Your own account is skipped.", {}),
+    "anvandare-aktivera": ("users-enable", "Enable account", "Turns sign-in back on for blocked accounts.", {}),
+    "anvandare-losenord": ("users-reset-password", "Reset password", "New password for one or more users. Empty = a unique, strong password per person, shown once.",
+                           {"Losenord": "New password (empty = unique per user)", "Byt": "Change password at next sign-in?"}),
+    "anvandare-logga-ut": ("users-sign-out", "Sign out everywhere", "Revokes every session and refresh token. The user has to sign in again on every device.", {}),
+    "anvandare-mfa": ("users-mfa", "MFA methods", "Which sign-in methods the users have registered: Authenticator, phone, FIDO2 key, Windows Hello …", {}),
+    "anvandare-mfa-aterstall": ("users-mfa-reset", "Reset MFA", "Removes every registered MFA method (the password stays) and signs out. The user registers again at next sign-in.", {}),
+    "anvandare-tap": ("users-tap", "Temporary Access Pass", "Creates a Temporary Access Pass, e.g. to register MFA or a new PC. Needs TAP to be enabled in the tenant.",
+                      {"Minuter": "Valid for minutes", "Engang": "One-time use?"}),
+    "anvandare-licenser": ("users-licenses", "User's licenses", "Licenses per user, and whether they are assigned directly or through a group.", {}),
+    "anvandare-licens-tilldela": ("users-license-assign", "Assign license", "Gives the users a license. Anyone without a usage location gets one first (required for licenses).",
+                                  {"Licens": "Which license?", "Plats": "Usage location if missing"}),
+    "anvandare-licens-ta-bort": ("users-license-remove", "Remove license", "Removes a directly assigned license. Group-based licenses go away by removing the user from the group.",
+                                 {"Licens": "Which license?"}),
+    "anvandare-chef": ("users-manager", "Set manager", "Sets the manager for one or more users.", {"Chef": "Who is the manager?"}),
+    "anvandare-grupper": ("users-groups", "User's groups and roles", "Groups, admin roles and administrative units the users are direct members of.", {}),
+    "anvandare-enheter": ("users-devices", "User's devices", "Devices the users own or have registered.", {}),
+    "anvandare-ta-bort": ("users-delete", "Delete user", "Deletes the users. They stay under Deleted users for 30 days and can be restored. Your own account is skipped.", {}),
+    "anvandare-raderade": ("users-deleted", "Deleted users", "Users in the recycle bin and how many days are left before they're gone for good.", {}),
+    "anvandare-aterstall": ("users-restore", "Restore deleted user", "Brings deleted users back with licenses and group memberships.",
+                            {"Raderad": "Which deleted users?"}),
+    "gaster-lista": ("guests-list", "List guests", "Every guest account: invitation accepted or not, when they were invited and last sign-in.", {}),
+    "gaster-ej-accepterade": ("guests-pending", "Guests who haven't accepted", "Invitations left unaccepted for more than X days – good candidates to clean up.",
+                              {"Dagar": "Older than how many days?"}),
+    "gaster-bjud-in": ("guests-invite", "Invite guest", "Invites one or more external users (comma-separated email addresses) and shows the redemption link.",
+                       {"Epost": "Email address(es)", "Namn": "Display name (only for a single address)", "Skicka": "Send the invitation by email?",
+                        "Lank": "Send the guest here afterwards", "Meddelande": "Custom message in the email"}),
+    "grupper-lista": ("groups-list", "List groups", "Every group with type (Microsoft 365, security, distribution), dynamic or assigned membership and email.",
+                      {"Sok": "Filter by name or email"}),
+    "grupper-medlemmar": ("groups-members", "Group members", "Who is in the group – directly, or also through nested groups.",
+                          {"Grupp": "Which group?", "Alla": "Include nested groups?"}),
+    "grupper-agare": ("groups-owners", "Group owners", "The owners of one or more groups.", {"Grupp": "Which groups?"}),
+    "grupper-utan-agare": ("groups-without-owners", "Groups without owners", "Groups nobody owns – a common clean-up item.", {}),
+    "grupper-dynamiska": ("groups-dynamic", "Dynamic groups", "Groups with dynamic membership, their rule and whether the rule is on or paused.", {}),
+    "grupper-skapa": ("groups-create", "Create group", "New security group or Microsoft 365 group, with owners and members right away.",
+                      {"Namn": "Group name", "Typ": "Type", "Beskrivning": "Description", "Agare": "Owners", "Medlemmar": "Members"}),
+    "grupper-lagg-till": ("groups-add", "Add to group", "Adds the users as members of one or more groups. Already a member counts as done.",
+                          {"Grupp": "Which groups?"}),
+    "grupper-ta-bort": ("groups-remove", "Remove from group", "Removes the users from one or more groups.", {"Grupp": "Which groups?"}),
+    "grupper-agare-lagg-till": ("groups-owners-add", "Add owner", "Makes the users owners of one or more groups.", {"Grupp": "Which groups?"}),
+    "grupper-agare-ta-bort": ("groups-owners-remove", "Remove owner", "Removes the users as owners. A group with owners must keep at least one.",
+                              {"Grupp": "Which groups?"}),
+    "grupper-dynamisk-regel": ("groups-dynamic-rule", "Set dynamic rule", 'Makes the group dynamic with a rule, e.g. (user.department -eq "Sales"). The rule replaces assigned members.',
+                               {"Grupp": "Which group?", "Regel": "Rule", "Lage": "State"}),
+    "grupper-radera": ("groups-delete", "Delete group", "Deletes the groups. Microsoft 365 groups can be restored for 30 days, security groups can't.",
+                       {"Grupp": "Which groups?"}),
+    "enheter-lista": ("devices-list", "List devices", "Every device in Entra ID: OS, join type (Entra joined, hybrid, registered), status and last sign-in.",
+                      {"Sok": "Filter by name or OS"}),
+    "enheter-inaktiva": ("devices-inactive", "Inactive devices", "Devices that haven't signed in for X days – candidates to disable and then delete.",
+                         {"Dagar": "No activity for how many days?"}),
+    "enheter-inaktivera": ("devices-disable", "Disable device", "Disables the devices in Entra ID (they can't sign in) without deleting them.", {"Enhet": "Which devices?"}),
+    "enheter-aktivera": ("devices-enable", "Enable device", "Turns disabled devices back on.", {"Enhet": "Which devices?"}),
+    "enheter-ta-bort": ("devices-delete", "Delete device", "Deletes the devices from Entra ID. BitLocker keys and LAPS passwords go with them – read them out first.",
+                        {"Enhet": "Which devices?"}),
+    "enheter-bitlocker": ("devices-bitlocker", "BitLocker keys", "Recovery keys for the devices. Every lookup is recorded in the audit log.", {"Enhet": "Which devices?"}),
+    "enheter-laps": ("devices-laps", "LAPS password", "The local admin password (Windows LAPS in Entra ID) for the devices. Every lookup is logged.",
+                     {"Enhet": "Which devices?"}),
+    "appar-lista": ("apps-list", "App registrations", "Every app registration with the number of secrets and certificates and when the first one expires.", {}),
+    "appar-hemligheter-gar-ut": ("apps-expiring-secrets", "Expiring secrets and certificates", "Client secrets and certificates (SAML signing on enterprise apps too) that expire within X days or already have.",
+                                 {"Dagar": "Within how many days?"}),
+    "appar-behorigheter": ("apps-permissions", "App permissions", "API permissions the app requests, delegated and application, and whether they have consent.",
+                           {"App": "Which app?"}),
+    "appar-hemlighet-ny": ("apps-secret-new", "New client secret", "Creates a new secret on the app. The value is shown only this once – copy it right away.",
+                           {"App": "Which app?", "Namn": "Name of the secret", "Manader": "Valid for months"}),
+    "appar-hemligheter-rensa": ("apps-secrets-cleanup", "Remove expired secrets", "Removes client secrets that have already expired from the apps.", {"App": "Which apps?"}),
+    "foretagsappar-lista": ("enterprise-apps-list", "Enterprise apps", "Enterprise applications: on/off, whether assignment is required, and whether the app is your own or external.", {}),
+    "foretagsappar-samtycken": ("enterprise-apps-consents", "Consents (delegated)", "Which apps have delegated permissions, granted by an admin for everyone or by individual users.",
+                                {"Fapp": "Only for one app (empty = all)"}),
+    "foretagsappar-anvandare": ("enterprise-apps-access", "Who has access to the app", "Users, groups and apps assigned to the enterprise app, with role.",
+                                {"Fapp": "Which enterprise app?"}),
+    "foretagsappar-samtycke": ("enterprise-apps-grant-consent", "Grant admin consent", "Grants consent for the whole organisation to every permission the app requests (like the button in the portal).",
+                               {"App": "Which app?"}),
+    "foretagsappar-aterkalla": ("enterprise-apps-revoke-consent", "Revoke consent", "Removes every consent (delegated and/or application permissions) the enterprise app has received.",
+                                {"Fapp": "Which enterprise app?", "Vad": "Which?"}),
+    "foretagsappar-av-pa": ("enterprise-apps-toggle", "Turn an enterprise app off or on", "Off = nobody can sign in to the app (good for a suspicious app). On = back again.",
+                            {"Fapp": "Which enterprise apps?", "Lage": "State"}),
+    "roller-lista": ("roles-list", "Who has admin roles", "Every active role assignment: role, who and scope.", {}),
+    "roller-anvandarens": ("roles-user", "User's roles", "Active and eligible (PIM) roles for the users.", {}),
+    "pim-berattigade": ("pim-eligible", "Eligible roles (PIM)", "Everyone who can activate a role in PIM, and for how long. Needs Entra ID P2.", {}),
+    "pim-aktiva": ("pim-active", "Active PIM assignments", "Roles that are active right now – permanent and activated through PIM – with end time. Needs Entra ID P2.", {}),
+    "roller-tilldela": ("roles-assign", "Assign role", "Gives the users an admin role – preferably as eligible in PIM (activated when needed) instead of permanent.",
+                        {"Roll": "Which role?", "Typ": "How?", "Dagar": "How many days? (0 = no end)", "Motivering": "Justification"}),
+    "roller-ta-bort": ("roles-remove", "Remove role", "Removes the role from the users – both active and eligible (PIM) assignments.",
+                       {"Roll": "Which role?", "Motivering": "Justification"}),
+    "pim-aktivera": ("pim-activate", "Activate my role (PIM)", "Activates a role you're eligible for, for a few hours. Often needs MFA and a justification.",
+                     {"Roll": "Which role?", "Timmar": "How many hours?", "Motivering": "Why?"}),
+    "ca-lista": ("ca-list", "Conditional Access policies", "Every policy: on, off or report-only, who and which apps it applies to and what it requires.", {}),
+    "ca-detalj": ("ca-detail", "Policy in plain words", "A policy broken down into who, apps, conditions and controls – with names instead of ids.",
+                  {"Policy": "Which policy?"}),
+    "ca-lage": ("ca-state", "Change policy state", "Put policies in report-only (logs what would have happened), on or off.",
+                {"Policy": "Which policies?", "Lage": "New state"}),
+    "ca-undanta": ("ca-exclude", "Exclude users from policy", "Adds users as exclusions in policies, e.g. break-glass accounts.", {"Policy": "Which policies?"}),
+    "ca-platser": ("ca-locations", "Named locations", "IP ranges and countries used in the policies, and which ones are trusted.", {}),
+    "ca-plats-ny": ("ca-location-new", "New named location", "Creates a location from IP ranges (CIDR, e.g. 203.0.113.0/24) or countries (SE, NO …).",
+                    {"Namn": "Name of the location", "Typ": "Type", "Varden": "IP ranges or country codes, comma-separated",
+                     "Betrodd": "Trusted location? (IP only)"}),
+    "loggar-inloggningar": ("logs-signins", "Sign-ins", "The sign-in log: who, app, IP, location, result and Conditional Access. Needs Entra ID P1 (max 999 rows).",
+                            {"Anvandare": "Only for user (empty = all)", "Timmar": "How far back (hours)?", "BaraFel": "Failures only?"}),
+    "loggar-misslyckade": ("logs-failed", "Failed sign-ins per user", "Summary: who failed, how many times, with which error and from how many IPs.",
+                           {"Timmar": "How far back (hours)?"}),
+    "loggar-granskning": ("logs-audit", "Audit log", "Who changed what in the directory: users, groups, roles, apps, policies (max 999 rows).",
+                          {"Timmar": "How far back (hours)?", "Sok": "Filter by activity or target", "Anvandare": "Only changes made by (UPN)"}),
+    "risk-anvandare": ("risk-users", "Risky users", "Users Entra ID Protection has flagged as risky. Needs Entra ID P2.", {"Alla": "Include remediated ones?"}),
+    "risk-handelser": ("risk-detections", "Risk detections", "Detected risks: unfamiliar location, leaked credentials, impossible travel etc. Needs Entra ID P2.",
+                       {"Dagar": "How far back (days)?"}),
+    "risk-avfarda": ("risk-dismiss", "Dismiss user risk", "Marks the risk as handled (e.g. after a password change).", {}),
+    "risk-komprometterad": ("risk-compromised", "Confirm compromised", "Sets the user risk to high (confirmed compromised) so risk policies kick in. Block the account too.", {}),
+    "mfa-status": ("mfa-status", "MFA status in the tenant", "Who has MFA registered, with which methods, and whether they are admins. Needs Entra ID P1.",
+                   {"BaraUtan": "Only those without MFA?"}),
+    "tenant-licenser": ("tenant-licenses", "License overview", "Every license: purchased, used, available and status.", {}),
+    "tenant-licens-anvandare": ("tenant-license-users", "Who has the license", "Every user with a given license, and whether it's direct or through a group.",
+                                {"Licens": "Which license?"}),
+    "tenant-domaner": ("tenant-domains", "Domains", "The domains in the tenant: verified, default, federated and what they're used for.", {}),
+    "tenant-info": ("tenant-info", "Organisation info", "Name, tenant id, country, created, directory sync and whether security defaults are on.", {}),
+    "tenant-installningar": ("tenant-settings", "Organisation settings", "What users are allowed to do: register apps, create groups and tenants, invite guests, consent to apps etc.", {}),
+    "tenant-installning-andra": ("tenant-setting-change", "Change organisation setting", "Turn on or off: app registration, creating groups and tenants, guest invitations, user consent, security defaults.",
+                                 {"Installning": "Which setting?", "Varde": "Yes or no?"}),
+    "lokalt-session": ("local-session", "My sign-in", "Who you're signed in as, in which tenant and with which scopes.", {}),
+    "lokalt-moduler": ("local-modules", "Modules", "PowerShell and the modules Euppa uses, with version.", {}),
+}
+for _a in ACTIONS:
+    _id, _name, _desc, _q = ACTIONS_EN[_a["id"]]
+    _a["alias"], _a["id"], _a["name"], _a["desc"] = _a["id"], _id, _name, _desc
+    for _p in _a["params"]:
+        _p["name"] = PARAM_EN[_p["namn"]]
+        _p["question"] = _q.get(_p["namn"]) or (U_EN[1] if _p["namn"] == "Anvandare" else _p["name"])
+        _p["choices"] = [CHOICE_EN.get(v, v) for v in _p["val"]]
+        _p["default_en"] = DEFAULT_EN.get(_p["standard"], _p["standard"])
+
+# PowerShell output: column names and common values in English (the worker renames them unless TRUPPA_LANG is sv)
+COLS_EN = {"Namn": "Name", "Aktiv": "Enabled", "Typ": "Type", "Titel": "Title", "Avdelning": "Department", "Licenser": "Licenses",
+           "Skapad": "Created", "Epost": "Email", "Kontor": "Office", "Mobil": "Mobile", "Foretag": "Company",
+           "AnstallningsId": "EmployeeId", "Chef": "Manager", "Kalla": "Source", "Plats": "Location", "Grupper": "Groups",
+           "LosenordBytt": "PasswordChanged", "SenastInloggad": "LastSignIn", "Dagar": "Days", "Losenord": "Password",
+           "BytVidInloggning": "ChangeAtSignIn", "Objekt": "Object", "Resultat": "Result", "Anvandare": "User", "Metod": "Method",
+           "Detalj": "Detail", "Licens": "License", "Fel": "Error", "Avstangt": "DisabledPlans", "Medlemskap": "Membership",
+           "Enhet": "Device", "Anslutning": "JoinType", "Kompatibel": "Compliant", "Senast": "LastSeen", "Raderad": "Deleted",
+           "DagarKvar": "DaysLeft", "Inbjuden": "Invited", "Lank": "Link", "Grupp": "Group", "Konto": "Account", "Agare": "Owner",
+           "Lage": "State", "Regel": "Rule", "Beskrivning": "Description", "Hanterad": "Managed", "Registrerad": "Registered",
+           "Nyckel": "Key", "NyckelId": "KeyId", "Enhetstyp": "VolumeType", "Sparat": "BackedUp", "NastaByte": "NextRotation",
+           "Hemligheter": "Secrets", "Certifikat": "Certificates", "ForstaUtgang": "FirstExpiry", "Konton": "Audience", "Var": "Where",
+           "Sort": "Kind", "GarUt": "Expires", "Resurs": "Resource", "Behorighet": "Permission", "Samtycke": "Consent",
+           "Hemlighet": "Secret", "KraverTilldelning": "AssignmentRequired", "Utgivare": "Publisher", "Roll": "Role",
+           "Sedan": "Since", "Omfattning": "Scope", "Till": "Until", "Fran": "From", "Hur": "How", "Del": "Part", "Varde": "Value",
+           "Undantag": "Exclusions", "Appar": "Apps", "Krav": "Controls", "Andrad": "Modified", "Innehall": "Contents",
+           "Betrodd": "Trusted", "Tid": "Time", "VillkorligAtkomst": "ConditionalAccess", "Klient": "Client", "Antal": "Count",
+           "VanligasteFel": "TopError", "Lander": "Countries", "Aktivitet": "Activity", "Kategori": "Category",
+           "UtfordAv": "InitiatedBy", "Mal": "Target", "Uppdaterad": "Updated", "Niva": "Level", "Metoder": "Methods",
+           "Standard": "Default", "Anvanda": "Used", "Totalt": "Total", "Lediga": "Available", "Varning": "Warning",
+           "Avstangda": "Suspended", "Doman": "Domain", "Verifierad": "Verified", "Inloggning": "Authentication",
+           "Tjanster": "Services", "Installning": "Setting", "Kod": "Code", "GiltigTill": "ValidUntil", "Engang": "OneTime",
+           "Sparas": "Persistence", "Behovs": "Required"}
+VALUES_EN = {"ja": "yes", "nej": "no", "gäst": "guest", "medlem": "member", "väntar": "pending", "accepterad": "accepted",
+             "molnet": "cloud", "lokal AD": "on-prem AD", "tilldelat": "assigned", "dynamiskt": "dynamic", "säkerhet": "security",
+             "e-postaktiverad säkerhet": "mail-enabled security", "Entra-ansluten": "Entra joined", "registrerad": "registered",
+             "direkt": "direct", "grupp": "group", "aktiv": "active", "berättigad (PIM)": "eligible (PIM)", "tills vidare": "no end",
+             "aktiverad i PIM": "activated in PIM", "tilldelad": "assigned", "på": "on", "av": "off", "alla": "all", "gäster": "guests",
+             "pausad": "paused", "egen": "own", "extern": "external", "admin – alla": "admin – everyone", "användare": "user",
+             "enhet": "device", "roll": "role", "adminenhet": "admin unit", "delegerad": "delegated", "program": "application",
+             "ja (admin)": "yes (admin)", "ja (användare)": "yes (user)", "utgången": "expired", "går ut snart": "expiring soon",
+             "appregistrering": "app registration", "företagsapp": "enterprise app", "hemlighet": "secret", "certifikat": "certificate",
+             "IP-intervall": "IP ranges", "länder": "countries", "godkänd": "granted", "nekad": "blocked", "ej tillämpad": "not applied",
+             "aldrig": "never", "OS-disk": "OS disk", "fast disk": "fixed disk", "flyttbar": "removable",
+             "(ingen nyckel sparad)": "(no key stored)", "(ingen ägare)": "(no owner)", "okänt": "unknown", "hela tenanten": "whole tenant",
+             "standardåtkomst": "default access", "spärrad": "blocked", "saknas": "missing", "för Excel-export": "for Excel export",
+             "permanent": "permanent", "Lösenord": "Password", "Telefon": "Phone", "FIDO2-nyckel": "FIDO2 key",
+             "OATH-app (TOTP)": "OATH app (TOTP)", "E-post (SSPR)": "Email (SSPR)", "Tillfälligt lösenord (TAP)": "Temporary Access Pass",
+             "Plattform (macOS)": "Platform (macOS)", "Authenticator (lösenordsfri)": "Authenticator (passwordless)",
+             "nytt lösenord": "new password", "TAP skapat": "TAP created", "OK": "OK", "molnet ": "cloud",
+             "samma som medlemmar": "same as members", "begränsad (standard)": "limited (default)", "mest begränsad": "most restricted",
+             "ingen": "nobody", "bara admins och gästinbjudare": "only admins and guest inviters",
+             "admins och alla medlemmar": "admins and all members", "alla, även gäster": "everyone, guests too",
+             # rows in the settings, info and policy tables
+             "Namn": "Name", "Tenant-ID": "Tenant ID", "Land": "Country", "Standarddomän": "Default domain",
+             "Initial domän": "Initial domain", "Katalogsynk (AD Connect)": "Directory sync (AD Connect)",
+             "Säkerhetsstandarder": "Security defaults", "Tekniska kontakter": "Technical contacts",
+             "Integritetskontakt": "Privacy contact", "Användare får registrera appar": "Users can register apps",
+             "Användare får skapa säkerhetsgrupper": "Users can create security groups",
+             "Användare får skapa tenants": "Users can create tenants", "Användare får läsa andra användare": "Users can read other users",
+             "Användare får läsa BitLocker-nyckel för egna enheter": "Users can read BitLocker keys for their own devices",
+             "Vem får bjuda in gäster": "Who can invite guests", "Gästers åtkomst": "Guest access",
+             "Användarsamtycke till appar": "User consent to apps", "Självbetjäning av lösenord för admins": "Self-service password reset for admins",
+             "Blockera MSOnline PowerShell": "Block MSOnline PowerShell", "Läge": "State", "Användare – gäller": "Users – included",
+             "Användare – undantag": "Users – excluded", "Grupper – gäller": "Groups – included", "Grupper – undantag": "Groups – excluded",
+             "Roller – gäller": "Roles – included", "Roller – undantag": "Roles – excluded", "Appar – gäller": "Apps – included",
+             "Appar – undantag": "Apps – excluded", "Användaråtgärder": "User actions", "Plattformar": "Platforms",
+             "Platser – gäller": "Locations – included", "Platser – undantag": "Locations – excluded", "Klientappar": "Client apps",
+             "Inloggningsrisk": "Sign-in risk", "Användarrisk": "User risk", "Krav": "Controls", "Session": "Session", "Ändrad": "Modified",
+             "appregistrering ": "app registration", "aktiverad": "enabled", "inaktiverad": "disabled", "borttagen": "removed",
+             "raderad": "deleted", "raderad (kan återställas i 30 dagar)": "deleted (can be restored for 30 days)",
+             "spärrad och utloggad överallt": "blocked and signed out everywhere", "utloggad överallt": "signed out everywhere",
+             "återställd": "restored", "risk avfärdad": "risk dismissed", "bekräftad komprometterad": "confirmed compromised",
+             "skapade företagsappen": "created the enterprise app", "inga utgångna hemligheter": "no expired secrets",
+             "påslagen": "turned on", "avstängd": "turned off", "det är ditt eget konto – hoppar över": "that's your own account – skipping",
+             "ja": "yes"}
+
+
+def aid(a):
+    return a["id"]
+
+
+def aname(a):
+    return L(a["name"], a["namn"])
+
+
+def adesc(a):
+    return L(a["desc"], a["beskrivning"])
+
+
+def area_name(sv):
+    ar = next((x for x in AREAS if x["namn"] == sv), None)
+    return L(ar["name"], ar["namn"]) if ar else sv
+
+
+def area_desc(ar):
+    return L(ar["desc"], ar["beskrivning"])
+
+
+def pquestion(p):
+    return L(p["question"], p["fraga"])
+
+
+def pname(p):
+    return L(p["name"], p["namn"])
+
+
+def plabel(p, v):
+    """The choice v (Swedish canonical value) in the chosen language."""
+    return L(CHOICE_EN.get(v, v), v)
+
+
 def writes(a):
     return a["typ"].startswith("änd")
 
 
 def badge(a):
     if writes(a):
-        return yellow("ändrar")
+        return yellow(L("changes", "ändrar"))
     if a["typ"].startswith("lok"):
-        return cyan("lokal")
-    return green("läs")
+        return cyan(L("local", "lokal"))
+    return green(L("read", "läs"))
 
 
 def find_action(name):
+    """By English id, Swedish id (alias) or name in either language."""
     n = name.lower()
     for a in ACTIONS:
-        if a["id"] == n or a["namn"].lower() == n:
+        if n in (a["id"], a["alias"], a["name"].lower(), a["namn"].lower()):
             return a
-    hits = [a for a in ACTIONS if n in a["id"] or n in a["namn"].lower()]
+    hits = [a for a in ACTIONS if n in a["id"] or n in a["alias"] or n in a["name"].lower() or n in a["namn"].lower()]
     return hits[0] if len(hits) == 1 else None
 
 
@@ -2803,34 +3202,44 @@ def fill(s, ph):
 
 
 def canon_choice(p, v):
-    for ch in p["val"]:
-        if ch.lower() == str(v).strip().lower():
-            return ch
-    raise Cancel(f"{p['namn']}={v} går inte – välj bland: {', '.join(p['val'])}")
+    """A choice given in English or Swedish -> the Swedish value PowerShell compares against."""
+    for sv, en in zip(p["val"], p["choices"]):
+        if str(v).strip().lower() in (sv.lower(), en.lower()):
+            return sv
+    raise Cancel(L(f"{p['name']}={v} won't work – choose from: {', '.join(p['choices'])}",
+                   f"{p['namn']}={v} går inte – välj bland: {', '.join(p['val'])}"))
+
+
+def given_value(p, given):
+    """The value for field p from Name=value on the command line (English or Swedish name, any case)."""
+    for k, v in given.items():
+        if k.lower() in (p["namn"].lower(), p["name"].lower()):
+            return True, v
+    return False, None
 
 
 def collect_params(a, t, given):
-    """-> (värden, tenant). Uppslag (@user, @group …) kan logga in och därmed sätta tenanten."""
+    """-> (values, tenant). Lookups (@user, @group …) may sign in and thereby set the tenant."""
     vals = {}
     for p in a["params"]:
-        default = fill(p["standard"], placeholders(t))
-        if p["namn"] in given:
-            v = given[p["namn"]]
+        default = fill(L(p["default_en"], p["standard"]), placeholders(t))
+        has, v = given_value(p, given)
+        if has:
             vals[p["namn"]] = canon_choice(p, v) if p["val"] and v else v
             continue
         if not ITTY:
             if not default and not p["valfri"]:
-                raise Cancel(f"saknar {p['namn']}=…  ({p['fraga']})")
+                raise Cancel(L(f"missing {p['name']}=…  ({p['question']})", f"saknar {p['namn']}=…  ({p['fraga']})"))
             vals[p["namn"]] = default
             continue
         if p["uppslag"] and not DRY:
             t, v = lookup_param(p, t, default)
         elif p["val"]:
-            v = choose([dict(label=ch, value=ch) for ch in p["val"]], title=p["fraga"], start=default or None)
+            v = choose([dict(label=plabel(p, ch), value=ch) for ch in p["val"]], title=pquestion(p), start=default or None)
             if v is None:
                 raise Cancel()
         else:
-            v = ask_text(p["fraga"] + (" (valfritt)" if p["valfri"] else ""), default, required=not p["valfri"])
+            v = ask_text(pquestion(p) + (L(" (optional)", " (valfritt)") if p["valfri"] else ""), default, required=not p["valfri"])
         vals[p["namn"]] = v
     return vals, t
 
@@ -2879,22 +3288,22 @@ def export_result(a, t, how, open_=True):
         code = FLAT_PS + (f"$p = {psq(str(base) + '.xlsx')}\n"
                           "if (Get-Module -ListAvailable ImportExcel) {\n"
                           "  Import-Module ImportExcel\n"
-                          f"  $rows | Export-Excel -Path $p -WorksheetName {psq(a['namn'][:30])} -TableName Euppa -TableStyle Medium2 "
+                          f"  $rows | Export-Excel -Path $p -WorksheetName {psq(aname(a)[:30])} -TableName Euppa -TableStyle Medium2 "
                           "-AutoSize -FreezeTopRow -BoldTopRow\n"
-                          f"}} else {{ $p = {psq(str(base) + '.csv')}; Write-Warning 'ImportExcel saknas – sparar CSV i stället (uppa install ImportExcel).'\n"
+                          f"}} else {{ $p = {psq(str(base) + '.csv')}; Write-Warning {psq(L('ImportExcel is missing – saving CSV instead (uppa install ImportExcel).', 'ImportExcel saknas – sparar CSV i stället (uppa install ImportExcel).'))}\n"
                           "  $rows | Export-Csv -Path $p -Delimiter ';' -Encoding utf8BOM -NoTypeInformation }\n"
-                          "Write-Host \"Sparat $($rows.Count) rader i $p\"")
+                          "Write-Host \"EUPPA-SAVED|$($rows.Count)|$p\"")
     else:
         code = FLAT_PS + (f"$p = {psq(str(base) + '.csv')}\n"
                           "$rows | Export-Csv -Path $p -Delimiter ';' -Encoding utf8BOM -NoTypeInformation\n"
-                          "Write-Host \"Sparat $($rows.Count) rader i $p\"")
+                          "Write-Host \"EUPPA-SAVED|$($rows.Count)|$p\"")
     ok, _, lines = run_ps("Sparar resultatet", code, show_output=False)
-    saved = next((t_[len("Sparat "):] for k, t_ in lines if k == "H" and t_.startswith("Sparat ")), "")
+    saved = next((t_.split("|", 2)[1:] for k, t_ in lines if k == "H" and t_.startswith("EUPPA-SAVED|")), None)
     if not ok or not saved:
         print_output(lines, quiet_host=True)
         return None
-    path = saved.split(" rader i ", 1)[-1]
-    out("  " + green("✔") + f" Sparat {saved}")
+    n, path = saved
+    out("  " + green("✔") + L(f" Saved {n} rows to {path}", f" Sparat {n} rader i {path}"))
     if open_ and ITTY:
         open_file(path)
     return path
@@ -2904,10 +3313,10 @@ def offer_export(a, t):
     """Efter en läsåtgärd med flera rader: exportera direkt, eller tillbaka."""
     global DIRTY
     try:
-        v = choose([dict(label="Tillbaka", value="back"),
+        v = choose([dict(label=L("Back", "Tillbaka"), value="back"),
                     dict(label="Exportera till Excel", hint="formaterad .xlsx i ~/Documents/Euppa", value="excel", key="x"),
                     dict(label="Exportera till CSV", hint="semikolon, UTF-8", value="csv", key="c")],
-                   title="Vad vill du göra med resultatet?", footer="↑/↓ · enter · x Excel · c CSV · q tillbaka")
+                   title=L("What do you want to do with the result?", "Vad vill du göra med resultatet?"), footer=L("↑/↓ · enter · x Excel · c CSV · q back", "↑/↓ · enter · x Excel · c CSV · q tillbaka"))
     except Cancel:
         return
     if v in (None, "back"):
@@ -2923,12 +3332,12 @@ def run_action(a, given=None, yes=False):
     """Kör en åtgärd: frågor → inloggning → kommandot syns → (bekräfta) → kör → resultat."""
     t = active_tenant()
     w = width()
-    out(f"  {accent('▍')}{bold(a['namn'])}  {badge(a)}" + (dim(f"  {t['name']}") if t else ""))
-    for l in wrap(a["beskrivning"], w - 6, 4) if a["beskrivning"] else []:
+    out(f"  {accent('▍')}{bold(aname(a))}  {badge(a)}" + (dim(f"  {t['name']}") if t else ""))
+    for l in wrap(adesc(a), w - 6, 4):
         out("    " + dim(l))
     print()
     local = a["typ"].startswith("lok")
-    looks = {p["uppslag"].rstrip("+") for p in a["params"] if p["uppslag"] and p["namn"] not in (given or {})}
+    looks = {p["uppslag"].rstrip("+") for p in a["params"] if p["uppslag"] and not given_value(p, given or {})[0]}
     if looks and not local and not DRY and ITTY:
         # en inloggning med allt som behövs – uppslagen och själva åtgärden
         t2 = ensure(t, sorted(set(a["scopes"]).union(*[LOOKUPS[k][0] for k in looks])))
@@ -2941,13 +3350,13 @@ def run_action(a, given=None, yes=False):
         if e.args:
             out(red("  " + e.args[0]))
             LAST_ERROR[0] = e.args[0]
-        out(dim("  Avbrutet."))
+        out(dim(L("  Cancelled.", "  Avbrutet.")))
         return False
     if DRY:
         if not local and not is_connected(t, a["scopes"]):
-            show_command(connect_code(t, a["scopes"]), "Först: logga in")
+            show_command(connect_code(t, a["scopes"]), L("First: sign in", "Först: logga in"))
         show_command(build_script(a, vals, t))
-        say("Torrkörning: inget kördes. Så här skulle det se ut.", "happy")
+        say(L("Dry run: nothing ran. This is what it would look like.", "Torrkörning: inget kördes. Så här skulle det se ut."), "happy")
         return True
     # Logga in först (det ändrar inget) – då vet vi vilken tenant ändringen hamnar i innan du bekräftar.
     if not local:
@@ -2960,24 +3369,24 @@ def run_action(a, given=None, yes=False):
     if writes(a) and not yes:
         print()
         if not ITTY:
-            say("Det här ändrar i tenanten. Lägg till --ja för att köra utan fråga.", "worry")
-            LAST_ERROR[0] = "ändrar i tenanten – kräver --ja"
+            say(L("This changes the tenant. Add --yes to run without asking.", "Det här ändrar i tenanten. Lägg till --ja för att köra utan fråga."), "worry")
+            LAST_ERROR[0] = L("changes the tenant – needs --yes", "ändrar i tenanten – kräver --ja")
             return False
-        say(f"Det här ändrar i {t['name']} ({t.get('tenant', '')}). Kolla kommandot ovan först." if t else
-            "Det här ändrar något. Kolla kommandot ovan först.", "worry")
-        if not confirm("Kör på riktigt?", False):
-            say("Okej, inget ändrat.", "happy")
+        say(L(f"This changes {t['name']} ({t.get('tenant', '')}). Check the command above first.", f"Det här ändrar i {t['name']} ({t.get('tenant', '')}). Kolla kommandot ovan först.") if t else
+            L("This changes something. Check the command above first.", "Det här ändrar något. Kolla kommandot ovan först."), "worry")
+        if not confirm(L("Run it for real?", "Kör på riktigt?"), False):
+            say(L("Okay, nothing changed.", "Okej, inget ändrat."), "happy")
             return False
     remember_action(a["id"])
-    ok, n, _ = run_ps(f"Kör {a['namn']}", script)
+    ok, n, _ = run_ps(L(f"Running {aname(a)}", f"Kör {aname(a)}"), script)
     print()
     if ok:
         if writes(a):
-            celebrate("Klart! Ändringen är gjord.")
+            celebrate(L("Done! The change is made.", "Klart! Ändringen är gjord."))
         else:
-            say(f"Klart! {n} rader." if n != 1 else "Klart! 1 rad.", "proud")
+            say(L(f"Done! {n} rows.", f"Klart! {n} rader.") if n != 1 else L("Done! 1 row.", "Klart! 1 rad."), "proud")
     else:
-        say("Det gick inte hela vägen. Felet står ovanför i rött.", "sad")
+        say(L("It didn't go all the way. The error is above in red.", "Det gick inte hela vägen. Felet står ovanför i rött."), "sad")
     if n and EXPORT_NOW == "json":
         rows = export_result(a, t, "json") or []
         emit_json({"ok": ok, "tenant": (t or {}).get("name", ""), "action": a["id"], "rows": rows})
@@ -2996,22 +3405,17 @@ def remember_action(aid):
 
 
 # ───────────────────────────── menyer ─────────────────────────────
-def area_of(name):
-    return next((x for x in AREAS if x["namn"] == name), {"namn": name, "ikon": name[:2].upper(), "farg": 205,
-                                                          "beskrivning": ""})
-
-
 def action_rows(acts):
-    rows = [dict(label=a["namn"], hint=a["beskrivning"], value=a["id"], badge=badge(a)) for a in acts if not writes(a)]
-    w = [dict(label=a["namn"], hint=a["beskrivning"], value=a["id"], badge=badge(a)) for a in acts if writes(a)]
+    rows = [dict(label=aname(a), hint=adesc(a), value=a["id"], badge=badge(a)) for a in acts if not writes(a)]
+    w = [dict(label=aname(a), hint=adesc(a), value=a["id"], badge=badge(a)) for a in acts if writes(a)]
     if rows and w:
-        rows.append(("head", "ändrar"))
+        rows.append(("head", L("changes", "ändrar")))
     return rows + w
 
 
 def action_search_rows():
-    return [dict(label=a["namn"], hint=f"{a['omrade']} · {a['beskrivning']}", value="a:" + a["id"], badge=badge(a),
-                 search=a["id"]) for a in ACTIONS]
+    return [dict(label=aname(a), hint=f"{area_name(a['omrade'])} · {adesc(a)}", value="a:" + a["id"], badge=badge(a),
+                 search=f"{a['id']} {a['alias']} {a['name']} {a['namn']}") for a in ACTIONS]
 
 
 def run_by_value(v):
@@ -3028,9 +3432,9 @@ def areas_menu(start=None):
         for ar in AREAS:
             its = [a for a in ACTIONS if a["omrade"] == ar["namn"]]
             if its:
-                rows.append(dict(label=ar["namn"], hint=ar["beskrivning"], value=ar["namn"], badge=dim(str(len(its)))))
-        rows += [("head", ""), dict(label="Tillbaka", value=None, key="q")]
-        cat = choose(rows, title="Områden · allt i Entra ID", start=last_area, status=conn_status, screen=True,
+                rows.append(dict(label=area_name(ar["namn"]), hint=area_desc(ar), value=ar["namn"], badge=dim(str(len(its)))))
+        rows += [("head", ""), dict(label=L("Back", "Tillbaka"), value=None, key="q")]
+        cat = choose(rows, title=L("Areas · everything in Entra ID", "Områden · allt i Entra ID"), start=last_area, status=conn_status, screen=True,
                      search_rows=action_search_rows())
         if cat is None:
             return
@@ -3041,9 +3445,9 @@ def areas_menu(start=None):
         its = [a for a in ACTIONS if a["omrade"] == cat]
         last = None
         while True:
-            v = choose(action_rows(its) + [("head", ""), dict(label="Tillbaka", value=None, key="q")],
-                       title=cat, start=last, status=conn_status, screen=True,
-                       footer="↑/↓ · enter kör · siffra väljer · q tillbaka" if width() >= 50 else None)
+            v = choose(action_rows(its) + [("head", ""), dict(label=L("Back", "Tillbaka"), value=None, key="q")],
+                       title=area_name(cat), start=last, status=conn_status, screen=True,
+                       footer=L("↑/↓ · enter runs · number picks · q back", "↑/↓ · enter kör · siffra väljer · q tillbaka") if width() >= 50 else None)
             if not v:
                 break
             last = v
@@ -3058,31 +3462,34 @@ def users_menu(preselected=None):
     else:
         t, users = run_lookup("alluser", t, "")
         if users is None:
-            say("Kunde inte hämta användarna. Logga in först (Logga in…).", "sad")
+            say(L("Could not fetch the users. Sign in first (Sign in…).", "Kunde inte hämta användarna. Logga in först (Logga in…)."), "sad")
             return
         if not users:
-            say("Hittade inga användare i tenanten.", "worry")
+            say(L("Found no users in the tenant.", "Hittade inga användare i tenanten."), "worry")
             return
         new_screen()
-        chosen = pick_many(users, f"Användare i {t['name']}" if t else "Användare")
+        chosen = pick_many(users, L(f"Users in {t['name']}", f"Användare i {t['name']}") if t else L("Users", "Användare"))
         if not chosen:
             return
     while True:
-        names = ", ".join(LABELS.get(u, u) for u in chosen[:3]) + (f" och {len(chosen) - 3} till" if len(chosen) > 3 else "")
+        names = ", ".join(LABELS.get(u, u) for u in chosen[:3]) + (L(f" and {len(chosen) - 3} more", f" och {len(chosen) - 3} till") if len(chosen) > 3 else "")
         acts = sorted([a for a in ACTIONS if user_param(a)], key=lambda a: (writes(a), [x["namn"] for x in AREAS].index(a["omrade"])
                                                                           if a["omrade"] in [x["namn"] for x in AREAS] else 99))
         rows, head = [], None
         for a in acts:
-            h = "Ändra" if writes(a) else "Visa"
+            h = L("Change", "Ändra") if writes(a) else "Visa"
             if h != head:
                 rows.append(("head", h))
                 head = h
-            rows.append(dict(label=a["namn"], hint=a["omrade"] + " · " + a["beskrivning"], value=a["id"], badge=badge(a)))
-        rows += [("head", ""), dict(label="Välj andra användare…", value="__again", key="v"),
-                 dict(label="Tillbaka", value=None, key="q")]
-        v = choose(rows, title=f"Vad vill du göra med {names}?", screen=True,
-                   msg=f"{len(chosen)} {'användare valda' if len(chosen) != 1 else 'användare vald'}. Allt körs på en gång – "
-                       "ändringar bekräftar du en gång för alla.", footer="↑/↓ · enter väljer · v välj om · q tillbaka")
+            rows.append(dict(label=aname(a), hint=area_name(a["omrade"]) + " · " + adesc(a), value=a["id"], badge=badge(a)))
+        rows += [("head", ""), dict(label=L("Pick other users…", "Välj andra användare…"), value="__again", key="v"),
+                 dict(label=L("Back", "Tillbaka"), value=None, key="q")]
+        v = choose(rows, title=L(f"What do you want to do with {names}?", f"Vad vill du göra med {names}?"), screen=True,
+                   msg=L(f"{len(chosen)} {'users' if len(chosen) != 1 else 'user'} selected. Everything runs in one go – "
+                         "you confirm changes once for all of them.",
+                         f"{len(chosen)} {'användare valda' if len(chosen) != 1 else 'användare vald'}. Allt körs på en gång – "
+                         "ändringar bekräftar du en gång för alla."),
+                   footer=L("↑/↓ · enter picks · v pick again · q back", "↑/↓ · enter väljer · v välj om · q tillbaka"))
         if not v:
             return
         if v == "__again":
@@ -3119,13 +3526,13 @@ def ago(iso):
 
 
 def add_tenant():
-    traw = ask_text("Tenantens domän eller id? (contoso, contoso.onmicrosoft.com, contoso.se eller en GUID)", required=True,
+    traw = ask_text(L("The tenant's domain or id? (contoso, contoso.onmicrosoft.com, contoso.com or a GUID)", "Tenantens domän eller id? (contoso, contoso.onmicrosoft.com, contoso.se eller en GUID)"), required=True,
                     check=lambda v: "Inga mellanslag." if " " in v.strip() else None)
     dom = tenant_domain(traw)
     ts = tenants()
     hit = next((x for x in ts if dom in (x.get("tenant", "").lower(), x.get("tenant_id", "").lower())), None)
     if hit:
-        say(f"{dom} finns redan i listan som {hit['name']}.", "happy")
+        say(L(f"{dom} is already in the list as {hit['name']}.", f"{dom} finns redan i listan som {hit['name']}."), "happy")
         set_config(active=hit["name"])
         return hit
     base = dom.split(".")[0].capitalize() if not GUID.match(dom) else "Tenant"
@@ -3135,7 +3542,7 @@ def add_tenant():
     ts.append(t)
     save_tenants(ts)
     use_tenant(t, quiet=True)
-    say(f"{t['name']} är tillagd och vald. Jag loggar in när en åtgärd behöver det.", "proud")
+    say(L(f"{t['name']} is added and selected. I'll sign in when an action needs it.", f"{t['name']} är tillagd och vald. Jag loggar in när en åtgärd behöver det."), "proud")
     return t
 
 
@@ -3156,31 +3563,32 @@ def tenants_menu():
         rows = tenant_rows()
         if rows:
             rows.append(("head", ""))
-        rows += [dict(label="Lägg till tenant…", hint="oftast onödigt – inloggning sparar tenanten", value="__new", key="n"),
-                 dict(label="Tillbaka", value=None, key="q")]
+        rows += [dict(label=L("Add tenant…", "Lägg till tenant…"), hint=L("rarely needed – signing in saves the tenant", "oftast onödigt – inloggning sparar tenanten"), value="__new", key="n"),
+                 dict(label=L("Back", "Tillbaka"), value=None, key="q")]
         name = choose(rows, title="Tenants" + (f" · {len(ts)} st" if ts else ""), status=conn_status, screen=True,
-                      msg="" if ts else "Listan fylls på av sig själv när du loggar in. Kör en åtgärd, eller lägg "
-                                        "till en tenant här.", footer="enter väljer · n ny · q tillbaka")
+                      msg="" if ts else L("The list fills up by itself when you sign in. Run an action, or add a tenant here.",
+                                          "Listan fylls på av sig själv när du loggar in. Kör en åtgärd, eller lägg till en tenant här."),
+                      footer=L("enter picks · n new · q back", "enter väljer · n ny · q tillbaka"))
         if name is None:
             return
         if name == "__new":
             try:
                 add_tenant()
             except Cancel:
-                out(dim("  Avbrutet."))
+                out(dim(L("  Cancelled.", "  Avbrutet.")))
             continue
         t = find_tenant(name)
         if not t:
             continue
         out(f"  {accent('▍')}{bold(t['name'])}")
-        for k, v in (("Domän", t.get("domain") or t.get("tenant") or "–"), ("Tenant-ID", t.get("tenant_id") or "–"),
+        for k, v in ((L("Domain", "Domän"), t.get("domain") or t.get("tenant") or "–"), ("Tenant-ID", t.get("tenant_id") or "–"),
                      ("Konto", t.get("upn") or "–"), ("Inloggning", AUTHS[auth_of(t)])):
             out("    " + dim(pad(k, 14)) + v)
         other = "device" if auth_of(t) == "interactive" else "interactive"
-        a = choose([dict(label="Jobba här", hint="gör den aktiv", value="use"),
-                    dict(label=f"Logga in med {AUTHS[other].lower()}", hint="byter inloggningssätt för tenanten", value="auth"),
-                    dict(label="Ta bort ur listan…", hint="inget ändras i själva tenanten", value="del"),
-                    dict(label="Tillbaka", value=None, key="q")], title=t["name"])
+        a = choose([dict(label=L("Work here", "Jobba här"), hint=L("make it active", "gör den aktiv"), value="use"),
+                    dict(label=L(f"Sign in with {AUTHS[other].lower()}", f"Logga in med {AUTHS[other].lower()}"), hint=L("changes how this tenant signs in", "byter inloggningssätt för tenanten"), value="auth"),
+                    dict(label="Ta bort ur listan…", hint=L("nothing changes in the tenant itself", "inget ändras i själva tenanten"), value="del"),
+                    dict(label=L("Back", "Tillbaka"), value=None, key="q")], title=t["name"])
         if a == "use":
             use_tenant(t, quiet=True)
             return
@@ -3189,31 +3597,31 @@ def tenants_menu():
             if WORKER.conn and WORKER.conn[0] == t["name"]:
                 WORKER.stop()
                 WORKER.warm()
-            say(f"{t['name']} loggar nu in med {AUTHS[other].lower()}.", "happy")
+            say(L(f"{t['name']} now signs in with {AUTHS[other].lower()}.", f"{t['name']} loggar nu in med {AUTHS[other].lower()}."), "happy")
         elif a == "del" and confirm(f"Ta bort {t['name']} ur listan?", False):
             save_tenants([x for x in tenants() if x["name"] != t["name"]])
             if config().get("active") == t["name"]:
                 set_config(active=None)
                 WORKER.stop()
                 WORKER.warm()
-            say(f"{t['name']} är borttagen ur listan.", "happy")
+            say(L(f"{t['name']} is removed from the list.", f"{t['name']} är borttagen ur listan."), "happy")
 
 
 def connect_menu():
     t = active_tenant()
     keep = keep_logins()
     auth = auth_of(t)
-    rows = [dict(label="Logga in", hint="läsbehörighet för nästan allt i Euppa på en gång", value="read"),
-            dict(label="Logga in med egna scopes…", hint="t.ex. User.ReadWrite.All,Group.ReadWrite.All", value="scopes"),
-            dict(label="Logga in i en annan tenant", hint="välj konto i webbläsaren", value="other"),
-            dict(label="Inloggningssätt: " + AUTHS[auth].lower(), hint="byt till " +
+    rows = [dict(label=L("Sign in", "Logga in"), hint=L("read access to almost everything in Euppa at once", "läsbehörighet för nästan allt i Euppa på en gång"), value="read"),
+            dict(label=L("Sign in with custom scopes…", "Logga in med egna scopes…"), hint="t.ex. User.ReadWrite.All,Group.ReadWrite.All", value="scopes"),
+            dict(label=L("Sign in to another tenant", "Logga in i en annan tenant"), hint=L("pick an account in the browser", "välj konto i webbläsaren"), value="other"),
+            dict(label=L("Sign-in method: ", "Inloggningssätt: ") + AUTHS[auth].lower(), hint="byt till " +
                  AUTHS["device" if auth == "interactive" else "interactive"].lower(), value="auth"),
-            dict(label="Kom ihåg inloggningar: " + ("på" if keep else "av"),
-                 hint=("sparas i nyckelringen mellan körningar" if keep else "bara medan Euppa är igång – ingen nyckelringsfråga"),
+            dict(label=L("Remember sign-ins: ", "Kom ihåg inloggningar: ") + (L("on", "på") if keep else L("off", "av")),
+                 hint=(L("kept in the keychain between runs", "sparas i nyckelringen mellan körningar") if keep else L("only while Euppa is running – no keychain prompt", "bara medan Euppa är igång – ingen nyckelringsfråga")),
                  value="keep"),
-            dict(label="Logga ut", hint="Disconnect-MgGraph", value="off", key="u"),
-            dict(label="Tillbaka", value=None, key="q")]
-    v = choose(rows, title=f"Logga in · {t['name'] if t else 'ingen tenant vald'}", status=conn_status, screen=True)
+            dict(label=L("Sign out", "Logga ut"), hint="Disconnect-MgGraph", value="off", key="u"),
+            dict(label=L("Back", "Tillbaka"), value=None, key="q")]
+    v = choose(rows, title=L(f"Sign in · {t['name'] if t else 'no tenant selected'}", f"Logga in · {t['name'] if t else 'ingen tenant vald'}"), status=conn_status, screen=True)
     try:
         if v == "read":
             ensure(t, READ_SCOPES)
@@ -3231,36 +3639,43 @@ def connect_menu():
             set_config(auth=new)
             WORKER.stop()
             WORKER.warm()
-            say(f"Nu loggar jag in med {AUTHS[new].lower()}.", "happy")
+            say(L(f"Now I sign in with {AUTHS[new].lower()}.", f"Nu loggar jag in med {AUTHS[new].lower()}."), "happy")
         elif v == "keep":
             set_keep(not keep)
         elif v == "off":
             logout()
     except Cancel:
-        out(dim("  Avbrutet."))
+        out(dim(L("  Cancelled.", "  Avbrutet.")))
 
 
 def set_keep(on):
     set_config(keep_logins=bool(on))
     WORKER.stop()
     if on:
-        say("Inloggningar sparas nu mellan körningar (Graph lägger token i nyckelringen). Får du en "
-            "nyckelringsfråga varje gång: välj 'Tillåt alltid', eller installera en signerad pwsh.", "happy")
+        say(L("Sign-ins are now kept between runs (Graph stores the token in the keychain). If you get a keychain prompt "
+              "every time: choose 'Always Allow', or install a signed pwsh.",
+              "Inloggningar sparas nu mellan körningar (Graph lägger token i nyckelringen). Får du en nyckelringsfråga "
+              "varje gång: välj 'Tillåt alltid', eller installera en signerad pwsh."), "happy")
     else:
-        say("Inloggningar sparas inte längre – du loggar in en gång per körning och slipper nyckelringen.", "happy")
+        say(L("Sign-ins are no longer kept – you sign in once per run and skip the keychain.",
+              "Inloggningar sparas inte längre – du loggar in en gång per körning och slipper nyckelringen."), "happy")
 
 
 def greeting():
     ts = tenants()
     t = active_tenant()
     if not ts:
-        return ("Hej! Jag är Euppa. Jag gör allt i Entra ID: användare, grupper, enheter, appar, roller och villkorlig "
-                "åtkomst. Välj något – jag loggar in när det behövs."), "happy"
+        return L("Hi! I'm Euppa. I do everything in Entra ID: users, groups, devices, apps, roles and Conditional Access. "
+                 "Pick something – I'll sign in when needed.",
+                 "Hej! Jag är Euppa. Jag gör allt i Entra ID: användare, grupper, enheter, appar, roller och villkorlig "
+                 "åtkomst. Välj något – jag loggar in när det behövs."), "happy"
     if not t:
-        return "Hej! Jag är Euppa. Välj en tenant, eller kör en åtgärd så loggar jag in.", "happy"
+        return L("Hi! I'm Euppa. Pick a tenant, or run an action and I'll sign in.",
+                 "Hej! Jag är Euppa. Välj en tenant, eller kör en åtgärd så loggar jag in."), "happy"
     if WORKER.conn and WORKER.conn[0] == t["name"]:
-        return "Inloggad och redo. Vad blir nästa steg?", "happy"
-    return f"Hej! Jag är Euppa. Välkommen tillbaka till {t['name']}. Börja skriva för att söka bland allt jag kan.", "happy"
+        return L("Signed in and ready. What's next?", "Inloggad och redo. Vad blir nästa steg?"), "happy"
+    return L(f"Hi! I'm Euppa. Welcome back to {t['name']}. Start typing to search everything I can do.",
+             f"Hej! Jag är Euppa. Välkommen tillbaka till {t['name']}. Börja skriva för att söka bland allt jag kan."), "happy"
 
 
 def main_menu():
@@ -3269,34 +3684,40 @@ def main_menu():
         msg, mood = greeting()
         t = active_tenant()
         rows = []
-        by_id = {a["id"]: a for a in ACTIONS}
+        by_id = {**{a["alias"]: a for a in ACTIONS}, **{a["id"]: a for a in ACTIONS}}
         recent = [by_id[x] for x in config().get("recent", []) if x in by_id][:3]
         if t and recent:
-            rows.append(("head", f"Fortsätt där du lämnade · {t['name']}"))
-            rows += [dict(label=a["namn"], hint=a["omrade"], value="a:" + a["id"], badge=badge(a)) for a in recent]
+            rows.append(("head", L(f"Pick up where you left off · {t['name']}", f"Fortsätt där du lämnade · {t['name']}")))
+            rows += [dict(label=aname(a), hint=area_name(a["omrade"]), value="a:" + a["id"], badge=badge(a)) for a in recent]
             rows.append(("head", ""))
-        rows += [dict(label="Användare…", hint="lista, kryssa en eller flera och gör något med dem", value="users", key="a"),
-                 dict(label="Områden…", hint=f"{len(ACTIONS)} åtgärder: grupper, enheter, appar, roller, villkorlig åtkomst …",
+        rows += [dict(label=L("Users…", "Användare…"), hint=L("list, tick one or more and do something with them", "lista, kryssa en eller flera och gör något med dem"), value="users", key="a"),
+                 dict(label=L("Areas…", "Områden…"), hint=L(f"{len(ACTIONS)} actions: groups, devices, apps, roles, Conditional Access …", f"{len(ACTIONS)} åtgärder: grupper, enheter, appar, roller, villkorlig åtkomst …"),
                       value="areas", key="o"),
-                 dict(label="Tenants…", hint=(f"{t['name']} · " if t else "") + f"{len(tenants())} sparade", value="tenants",
+                 dict(label="Tenants…", hint=(f"{t['name']} · " if t else "") + L(f"{len(tenants())} saved", f"{len(tenants())} sparade"), value="tenants",
                       key="t"),
-                 dict(label="Logga in…", hint="Microsoft Graph · inloggningssätt · kom ihåg", value="connect", key="l"),
-                 dict(label="Avsluta", value="quit", key="q")]
+                 dict(label=L("Sign in…", "Logga in…"), hint=L("Microsoft Graph · sign-in method · remember", "Microsoft Graph · inloggningssätt · kom ihåg"), value="connect", key="l"),
+                 dict(label="Language: " + ("English" if LANG == "en" else "Svenska"),
+                      hint=L("switch to Svenska – for the whole troupe", "byt till English – för hela truppen"), value="lang", key="s"),
+                 dict(label=L("Quit", "Avsluta"), value="quit", key="q")]
         v = choose(rows, msg=msg, mood=mood, status=conn_status, start=last or ("a:" + recent[0]["id"] if t and recent else "users"),
-                   footer="↑/↓ · enter · siffra/bokstav väljer · q avslutar",
-                   sub=f"euppa {VERSION}" + ("  ·  torrkörning" if DRY else ""), screen=True,
+                   footer=L("↑/↓ · enter · number/letter picks · q quits", "↑/↓ · enter · siffra/bokstav väljer · q avslutar"),
+                   sub=f"euppa {VERSION}" + (L("  ·  dry run", "  ·  torrkörning") if DRY else ""), screen=True,
                    search_rows=action_search_rows())
         last = v
         if v in (None, "quit"):
             print()
-            if WORKER.conn and keep_logins() and ITTY and confirm("Logga ut från Microsoft Graph innan du går?", False):
+            if WORKER.conn and keep_logins() and ITTY and confirm(L("Sign out of Microsoft Graph before you go?", "Logga ut från Microsoft Graph innan du går?"), False):
                 logout()
-            say(random.choice(["Hej då!", "Vi ses!", "Hej då! Glöm inte break-glass-kontot."]), "happy")
+            say(random.choice([L("Bye!", "Hej då!"), L("See you!", "Vi ses!"), L("Bye! Don't forget the break-glass account.", "Hej då! Glöm inte break-glass-kontot.")]), "happy")
             print()
             return
         try:
             if v.startswith("a:"):
                 run_by_value(v)
+            elif v == "lang":           # restart so every text is in the new language
+                set_lang("sv" if LANG == "en" else "en")
+                WORKER.stop()
+                os.execv(sys.executable, [sys.executable, os.path.realpath(__file__)] + sys.argv[1:])
             elif v == "areas":
                 areas_menu()
             elif v == "users":
@@ -3308,14 +3729,14 @@ def main_menu():
         except Cancel as e:
             if e.args:
                 out(red("  " + e.args[0]))
-            out(dim("  Avbrutet."))
+            out(dim(L("  Cancelled.", "  Avbrutet.")))
 
 
 # ───────────────────────────── CLI ─────────────────────────────
 def list_tenants():
     ts = tenants()
     if not ts:
-        say("Inga tenants än. De sparas automatiskt när du loggar in (euppa logga-in), eller: euppa ny.", "happy")
+        say(L("No tenants yet. They're saved automatically when you sign in (euppa login), or: euppa new.", "Inga tenants än. De sparas automatiskt när du loggar in (euppa logga-in), eller: euppa ny."), "happy")
         return
     act_ = config().get("active")
     nw = min(max(len(t["name"]) for t in ts) + 2, 24)
@@ -3326,15 +3747,16 @@ def list_tenants():
 
 def list_actions(as_json):
     if as_json:
-        emit_json({"version": VERSION, "areas": AREAS, "actions": [{k: v for k, v in a.items() if k != "ps"} for a in ACTIONS],
+        emit_json({"version": VERSION, "lang": LANG, "areas": AREAS,
+                   "actions": [{k: v for k, v in a.items() if k != "ps"} for a in ACTIONS],
                    "lookups": {k: v[1] for k, v in LOOKUPS.items()}})
         return
     w = width()
     nw = min(max(len(a["id"]) for a in ACTIONS) + 2, 34)
     for ar in AREAS:
-        out("  " + accent("▍") + bold(ar["namn"]) + dim("  " + ar["beskrivning"]))
+        out("  " + accent("▍") + bold(area_name(ar["namn"])) + dim("  " + area_desc(ar)))
         for a in [x for x in ACTIONS if x["omrade"] == ar["namn"]]:
-            out(f"    {pad(cut(a['id'], nw), nw)}{pad(badge(a), 8)}" + (dim(a["namn"]) if w >= 80 else ""))
+            out(f"    {pad(cut(a['id'], nw), nw)}{pad(badge(a), 9)}" + (dim(aname(a)) if w >= 80 else ""))
 
 
 def main(argv=None):
@@ -3343,93 +3765,121 @@ def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("--no-anim", action="store_true")
-    pre.add_argument("-n", "--torr", action="store_true")
+    pre.add_argument("-n", "--dry-run", "--torr", dest="dry", action="store_true")
     known, rest = pre.parse_known_args(argv)
     if known.no_anim:
         ANIM = False
-    DRY = known.torr
+    DRY = known.dry
 
-    ap = argparse.ArgumentParser(prog="euppa", description="Euppa – allt i Entra ID med några knapptryck.")
+    # English commands first; the Swedish ones stay as aliases so older scripts and Ruppa versions keep working
+    ap = argparse.ArgumentParser(prog="euppa", description=L("Euppa – everything in Entra ID in a few keystrokes.",
+                                                            "Euppa – allt i Entra ID med några knapptryck."))
     ap.add_argument("--version", action="version", version="euppa " + VERSION)
     sub = ap.add_subparsers(dest="cmd")
-    sub.add_parser("tenants", aliases=["kunder"], help="tenants du loggat in i")
-    u = sub.add_parser("tenant", aliases=["kund", "use"], help="växla tenant")
+    sub.add_parser("tenants", aliases=["kunder"], help=L("tenants you have signed in to", "tenants du loggat in i"))
+    u = sub.add_parser("tenant", aliases=["kund", "use"], help=L("switch tenant", "växla tenant"))
     u.add_argument("namn")
-    sub.add_parser("ny", help="lägg till en tenant för hand")
-    li = sub.add_parser("logga-in", aliases=["login"], help="logga in i Microsoft Graph")
-    li.add_argument("--scopes", default="", help="kommaseparerade (standard: läs nästan allt)")
-    li.add_argument("--enhetskod", action="store_true", help="logga in med enhetskod (device code)")
-    li.add_argument("--tenant", default="", help="tenantens domän eller id")
-    la = sub.add_parser("åtgärder", aliases=["atgarder", "lista"], help="lista åtgärderna")
-    la.add_argument("--json", action="store_true", help="maskinläsbart (för Ruppa)")
-    an = sub.add_parser("användare", aliases=["anvandare", "users"], help="välj användare och gör något med dem")
-    an.add_argument("upn", nargs="*", help="hoppa över listan: de här användarna")
-    up = sub.add_parser("uppslag", aliases=["lookup"], help="sök i tenanten: user, group, device, app, sp, role, ca, sku")
+    sub.add_parser("new", aliases=["ny"], help=L("add a tenant by hand", "lägg till en tenant för hand"))
+    li = sub.add_parser("login", aliases=["logga-in"], help=L("sign in to Microsoft Graph", "logga in i Microsoft Graph"))
+    li.add_argument("--scopes", default="", help=L("comma-separated (default: read almost everything)",
+                                                   "kommaseparerade (standard: läs nästan allt)"))
+    li.add_argument("--device-code", "--enhetskod", dest="enhetskod", action="store_true",
+                    help=L("sign in with a device code", "logga in med enhetskod (device code)"))
+    li.add_argument("--tenant", default="", help=L("the tenant's domain or id", "tenantens domän eller id"))
+    la = sub.add_parser("actions", aliases=["åtgärder", "atgarder", "lista", "list"], help=L("list the actions", "lista åtgärderna"))
+    la.add_argument("--json", action="store_true", help=L("machine-readable (for Ruppa)", "maskinläsbart (för Ruppa)"))
+    an = sub.add_parser("users", aliases=["användare", "anvandare"], help=L("pick users and do something with them",
+                                                                         "välj användare och gör något med dem"))
+    an.add_argument("upn", nargs="*", help=L("skip the list: these users", "hoppa över listan: de här användarna"))
+    up = sub.add_parser("lookup", aliases=["uppslag"], help=L("search the tenant: user, group, device, app, sp, role, ca, sku",
+                                                              "sök i tenanten: user, group, device, app, sp, role, ca, sku"))
     up.add_argument("typ")
     up.add_argument("sok", nargs="?", default="")
-    up.add_argument("--json", action="store_true", help="maskinläsbart (för Ruppa)")
-    up.add_argument("--alla", action="store_true", help="user: alla användare i tenanten")
-    k = sub.add_parser("kör", aliases=["kor", "run"], help="kör en åtgärd")
+    up.add_argument("--json", action="store_true", help=L("machine-readable (for Ruppa)", "maskinläsbart (för Ruppa)"))
+    up.add_argument("--all", "--alla", dest="alla", action="store_true", help=L("user: every user in the tenant",
+                                                                              "user: alla användare i tenanten"))
+    k = sub.add_parser("run", aliases=["kör", "kor"], help=L("run an action", "kör en åtgärd"))
     k.add_argument("atgard")
-    k.add_argument("par", nargs="*", help="Namn=värde")
-    k.add_argument("--ja", action="store_true", help="bekräfta ändrande åtgärder utan att fråga")
-    k.add_argument("--excel", action="store_true", help="spara resultatet som Excel i ~/Documents/Euppa")
-    k.add_argument("--csv", action="store_true", help="spara resultatet som CSV i ~/Documents/Euppa")
-    k.add_argument("--json", action="store_true", help="skriv resultatet som JSON (för Ruppa)")
-    kh = sub.add_parser("kom-ihåg", aliases=["kom-ihag"], help="spara inloggningar mellan körningar: på eller av")
-    kh.add_argument("val", choices=["på", "pa", "av", "on", "off"])
-    sub.add_parser("logga-ut", aliases=["logout"], help="logga ut från Microsoft Graph")
-    sub.add_parser("hej")
+    k.add_argument("par", nargs="*", help=L("Name=value", "Namn=värde"))
+    k.add_argument("--yes", "-y", "--ja", dest="ja", action="store_true",
+                   help=L("confirm actions that change something without asking", "bekräfta ändrande åtgärder utan att fråga"))
+    k.add_argument("--excel", action="store_true", help=L("save the result as Excel in ~/Documents/Euppa",
+                                                          "spara resultatet som Excel i ~/Documents/Euppa"))
+    k.add_argument("--csv", action="store_true", help=L("save the result as CSV in ~/Documents/Euppa",
+                                                        "spara resultatet som CSV i ~/Documents/Euppa"))
+    k.add_argument("--json", action="store_true", help=L("print the result as JSON (for Ruppa)", "skriv resultatet som JSON (för Ruppa)"))
+    kh = sub.add_parser("remember", aliases=["kom-ihåg", "kom-ihag"], help=L("keep sign-ins between runs: on or off",
+                                                                           "spara inloggningar mellan körningar: på eller av"))
+    kh.add_argument("val", choices=["on", "off", "på", "pa", "av"])
+    sub.add_parser("logout", aliases=["logga-ut"], help=L("sign out of Microsoft Graph", "logga ut från Microsoft Graph"))
+    lg = sub.add_parser("lang", aliases=["språk", "sprak"], help=L("show or set the language (en, sv) for the whole troupe",
+                                                                   "visa eller välj språk (en, sv) för hela truppen"))
+    lg.add_argument("val", nargs="?", default="")
+    sub.add_parser("hello", aliases=["hej"])
     a = ap.parse_args(rest)
+    cmd = {"kunder": "tenants", "kund": "tenant", "use": "tenant", "ny": "new", "logga-in": "login",
+           "åtgärder": "actions", "atgarder": "actions", "lista": "actions", "list": "actions",
+           "användare": "users", "anvandare": "users", "uppslag": "lookup", "kör": "run", "kor": "run",
+           "kom-ihåg": "remember", "kom-ihag": "remember", "logga-ut": "logout", "språk": "lang", "sprak": "lang",
+           "hej": "hello"}.get(a.cmd, a.cmd)
 
     as_json = getattr(a, "json", False)
-    if as_json:                           # allt utom JSON-raden till stderr, utan färger och animationer
+    if as_json:                           # everything except the JSON line goes to stderr, without colours or animations
         sys.stdout = sys.stderr
         TTY = COLOR = ANIM = False
 
-    if a.cmd in ("åtgärder", "atgarder", "lista"):
+    if cmd == "lang":
+        if a.val[:2].lower() in ("en", "sv"):
+            set_lang(a.val[:2].lower())
+            print(L("  Language: English (for the whole troupe)", "  Språk: svenska (för hela truppen)"))
+        else:
+            print(L("  Language: English · change with: euppa lang sv", "  Språk: svenska · byt med: euppa lang en"))
+        return 0
+    if cmd == "actions":
         list_actions(as_json)
         return 0
-    if a.cmd == "hej":
+    if cmd == "hello":
         print()
-        say(random.choice(JOKES), random.choice(["happy", "proud", "wow", "left"]))
+        say(random.choice(L(JOKES_EN, JOKES_SV)), random.choice(["happy", "proud", "wow", "left"]))
         print()
         return 0
-    if a.cmd in ("tenants", "kunder"):
+    if cmd == "tenants":
         list_tenants()
         return 0
-    if a.cmd in ("kom-ihåg", "kom-ihag"):
-        set_keep(a.val in ("på", "pa", "on"))
+    if cmd == "remember":
+        set_keep(a.val in ("on", "på", "pa"))
         return 0
-    if a.cmd in ("tenant", "kund", "use"):
+    if cmd == "tenant":
         t = find_tenant(a.namn)
         if not t:
-            say(f"Hittar ingen tenant {a.namn}. Se euppa tenants.", "sad")
+            say(L(f"No tenant called {a.namn}. See: euppa tenants", f"Hittar ingen tenant {a.namn}. Se euppa tenants."), "sad")
             return 1
         use_tenant(t)
         return 0
 
     if not (shutil.which("pwsh") or shutil.which("pwsh-preview")):
-        say("Jag hittar inte pwsh (PowerShell 7). Installera det: Windows: winget install Microsoft.PowerShell · "
-            "macOS: brew install --cask powershell · eller: uppa install powershell", "sad")
+        say(L("I can't find pwsh (PowerShell 7). Install it: Windows: winget install Microsoft.PowerShell · "
+              "macOS: brew install --cask powershell · or: uppa install powershell",
+              "Jag hittar inte pwsh (PowerShell 7). Installera det: Windows: winget install Microsoft.PowerShell · "
+              "macOS: brew install --cask powershell · eller: uppa install powershell"), "sad")
         if as_json:
-            emit_json({"ok": False, "error": "pwsh saknas"})
+            emit_json({"ok": False, "error": L("pwsh is missing", "pwsh saknas")})
         return 1
 
     try:
         if a.cmd is None:
             if not ITTY or not TTY:
-                print(__doc__)
+                print(L(__doc__, DOC_SV))
                 return 0
             signal.signal(signal.SIGINT, signal.default_int_handler)
             WORKER.warm()
             main_menu()
             return 0
-        if a.cmd == "ny":
+        if cmd == "new":
             if not ITTY:
-                sys.exit("  behöver en riktig terminal")
+                sys.exit(L("  needs a real terminal", "  behöver en riktig terminal"))
             return 0 if add_tenant() else 1
-        if a.cmd in ("logga-in", "login"):
+        if cmd == "login":
             t = active_tenant()
             if a.tenant:
                 t = find_tenant(a.tenant) or dict(name="", tenant=tenant_domain(a.tenant))
@@ -3440,39 +3890,44 @@ def main(argv=None):
             if t and a.enhetskod and t.get("name"):
                 update_tenant(t["name"], auth="device")
             return 0 if t else 1
-        if a.cmd in ("logga-ut", "logout"):
+        if cmd == "logout":
             return 0 if logout() else 1
-        if a.cmd in ("användare", "anvandare", "users"):
+        if cmd == "users":
             if not ITTY:
-                sys.exit("  behöver en riktig terminal (eller: euppa kör ÅTGÄRD Anvandare=a@x.se,b@x.se --ja)")
+                sys.exit(L("  needs a real terminal (or: euppa run ACTION Users=a@x.com,b@x.com --yes)",
+                           "  behöver en riktig terminal (eller: euppa kör ÅTGÄRD Anvandare=a@x.se,b@x.se --ja)"))
             WORKER.warm()
             users_menu(a.upn or None)
             return 0
-        if a.cmd in ("uppslag", "lookup"):
+        if cmd == "lookup":
             WORKER.warm()
             return 0 if cmd_lookup(a.typ, a.sok, as_json, a.alla) else 1
-        if a.cmd in ("kör", "kor", "run"):
+        if cmd == "run":
             act_ = find_action(a.atgard)
             if not act_:
-                hits = [x["id"] for x in ACTIONS if a.atgard.lower() in x["id"] or a.atgard.lower() in x["namn"].lower()]
-                say(f"Flera åtgärder matchar {a.atgard}: {', '.join(hits[:6])}." if hits else
-                    f"Hittar ingen åtgärd som heter {a.atgard}. Se euppa åtgärder.", "worry" if hits else "sad")
+                q = a.atgard.lower()
+                hits = [aid(x) for x in ACTIONS if q in x["id"] or q in aid(x) or q in aname(x).lower()]
+                say(L(f"Several actions match {a.atgard}: {', '.join(hits[:6])}." if hits else
+                      f"No action called {a.atgard}. See: euppa actions",
+                      f"Flera åtgärder matchar {a.atgard}: {', '.join(hits[:6])}." if hits else
+                      f"Hittar ingen åtgärd som heter {a.atgard}. Se euppa åtgärder."), "worry" if hits else "sad")
                 if as_json:
-                    emit_json({"ok": False, "error": "okänd åtgärd", "rows": []})
+                    emit_json({"ok": False, "error": L("unknown action", "okänd åtgärd"), "rows": []})
                 return 1
             given = dict(x.split("=", 1) for x in a.par if "=" in x)
             EXPORT_NOW = "json" if as_json else "excel" if a.excel else "csv" if a.csv else None
             WORKER.warm()
             ok = run_action(act_, given, yes=a.ja)
             if as_json and not EMITTED:
-                emit_json({"ok": False, "error": LAST_ERROR[0] or "inget kördes (inloggningen misslyckades – se loggen)", "rows": []})
+                emit_json({"ok": False, "error": LAST_ERROR[0] or L("nothing ran (sign-in failed – see the log)",
+                                                                     "inget kördes (inloggningen misslyckades – se loggen)"), "rows": []})
             return 0 if ok else 1
     except Cancel as e:
         if e.args:
             out(red("  " + e.args[0]))
-        out(dim("  Avbrutet."))
+        out(dim(L("  Cancelled.", "  Avbrutet.")))
         if as_json:
-            emit_json({"ok": False, "error": e.args[0] if e.args else "avbrutet", "rows": [], "items": []})
+            emit_json({"ok": False, "error": e.args[0] if e.args else L("cancelled", "avbrutet"), "rows": [], "items": []})
         return 1
     except KeyboardInterrupt:
         sys.stdout.write("\033[?25h\n")

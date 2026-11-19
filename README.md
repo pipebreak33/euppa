@@ -1,16 +1,18 @@
 # Euppa
 
+**English** · [Svenska](README.sv.md)
+
 <p align="center">
-  <img src="assets/euppa.svg" alt="Euppa: Hej! Jag är Euppa." width="720">
+  <img src="assets/euppa.svg" alt="Euppa: Hi! I'm Euppa." width="720">
 </p>
 
-Allt du behöver göra i **Entra ID**, med några knapptryck i stället för att leta i portalen eller skriva Graph-anrop.
-Fungerar likadant på **Windows, macOS och Linux**. Kusin till [Uppa](https://github.com/pipebreak33/uppa),
-[Puppa](https://github.com/pipebreak33/puppa) och [Muppa](https://github.com/pipebreak33/muppa), och finns som egen
-sida i [Ruppa](https://github.com/pipebreak33/ruppa). Maskoten är ett E med ögon: den föreslår nästa steg, blinkar och
-tittar runt medan något körs, blir glad när det gick bra och orolig innan något ändras.
+Everything you need to do in **Entra ID**, in a few keystrokes instead of hunting in the portal or writing Graph calls.
+Works the same on **Windows, macOS and Linux**. One of the tools in the troupe with [Uppa](https://github.com/pipebreak33/uppa),
+[Puppa](https://github.com/pipebreak33/puppa) and [Muppa](https://github.com/pipebreak33/muppa), and it has its own
+page in [Ruppa](https://github.com/pipebreak33/ruppa). The mascot is an E with eyes: it suggests the next step, blinks and
+looks around while something runs, is happy when it went well and worried before something changes.
 
-## Installera (eller uppdatera – kör samma rad igen)
+## Install (or update: run the same line again)
 
 **Windows** (PowerShell):
 
@@ -24,20 +26,19 @@ irm https://raw.githubusercontent.com/pipebreak33/euppa/main/install.ps1 | iex
 curl -fsSL https://raw.githubusercontent.com/pipebreak33/euppa/main/install.sh | sh
 ```
 
-Installern hittar (eller på Windows installerar) Python 3.8+, lägger Euppa i `~/.euppa/app` och skapar kommandot
-`euppa` (`~/.local/bin/euppa`, eller `%USERPROFILE%\.euppa\bin\euppa.cmd` + PATH på Windows). Dina tenants och
-inställningar i `~/.euppa` rörs aldrig vid uppdatering. Den varnar om PowerShell 7 eller modulen saknas.
-Med [Wuppa](https://github.com/pipebreak33/wuppa) eller [Ruppa](https://github.com/pipebreak33/ruppa) kommer Euppa
-med automatiskt.
+The installer finds (or on Windows installs) Python 3.8+, puts Euppa in `~/.euppa/app` and creates the command
+`euppa` (`~/.local/bin/euppa`, or `%USERPROFILE%\.euppa\bin\euppa.cmd` + PATH on Windows). Your tenants and
+settings in `~/.euppa` are never touched by an update. It warns if PowerShell 7 or the module is missing.
+With [Wuppa](https://github.com/pipebreak33/wuppa) or [Ruppa](https://github.com/pipebreak33/ruppa), Euppa comes
+along automatically.
 
-Styr källan med `EUPPA_REPO=ägare/repo` och `EUPPA_BRANCH=gren`. Från en lokal kopia: `./install.sh` / `./install.ps1`.
+Choose the source with `EUPPA_REPO=owner/repo` and `EUPPA_BRANCH=branch`. From a local copy: `./install.sh` / `./install.ps1`.
 
-Kräver PowerShell 7 (`pwsh`) och **bara en modul**: `Microsoft.Graph.Authentication`. Allt går via
-`Invoke-MgGraphRequest` mot Microsoft Graph, så inga av de tunga Graph-undermodulerna behövs.
-`ImportExcel` behövs bara för Excel-export (annars blir det CSV).
+Needs PowerShell 7 (`pwsh`) and **only one module**: `Microsoft.Graph.Authentication`. Everything goes through
+`Invoke-MgGraphRequest` to Microsoft Graph, so none of the heavy Graph submodules are needed.
+`ImportExcel` is only needed for the Excel export (otherwise you get CSV).
 
-
-## Avinstallera
+## Uninstall
 
 **Windows** (PowerShell):
 
@@ -51,215 +52,222 @@ irm https://raw.githubusercontent.com/pipebreak33/euppa/main/uninstall.ps1 | iex
 curl -fsSL https://raw.githubusercontent.com/pipebreak33/euppa/main/uninstall.sh | sh
 ```
 
-Tar bort programmet och kommandot `euppa` (och PATH-posten på Windows). Det behåller dina tenants och inställningar i `~/.euppa`, och rapporterna i `~/Documents/Euppa`.
-`EUPPA_PURGE=1` tar bort även dina data, och `EUPPA_YES=1` hoppar över frågan.
+Removes the program and the `euppa` command (and the PATH entry on Windows). Your tenants and settings in `~/.euppa`, and the reports in `~/Documents/Euppa`, are kept.
+`EUPPA_PURGE=1` removes your data too, and `EUPPA_YES=1` skips the question.
 
-## Så funkar det
+## How it works
 
-- **Användare först.** *Användare…* listar alla i tenanten. Skriv för att fuzzy-söka, kryssa en eller flera med
-  mellanslag (`ctrl+a` kryssar alla som syns) och välj vad som ska hända: lägg till i grupp, ta bort ur grupp,
-  tilldela licens, spärra, återställ lösenord eller MFA, ge en roll … Allt körs på en gång och bekräftas en gång.
-- **Områden.** 83 åtgärder i 11 områden: användare, gäster, grupper, enheter, appar, roller och
-  PIM, villkorlig åtkomst, loggar, säkerhet och tenanten. Börja skriva i vilken meny som helst så söker du bland allt.
-- **Sök i tenanten.** När en åtgärd frågar efter användare, grupp, enhet, app, roll, policy eller licens räcker en del
-  av namnet. En träff väljs direkt, flera ger en lista (kryssrutor när flera kan väljas).
-- **Rätt scopes per uppgift.** Euppa loggar in med `Connect-MgGraph` och just de scopes som åtgärden behöver, och
-  lägger till fler när det behövs utan att tappa de gamla. *Logga in…* ger läsbehörighet för nästan allt på en gång.
-- **Tenants som i Puppa.** Inloggningen sparar tenanten (domän, id, konto) i *Tenants…*, så du kan växla mellan
-  kunder. Första gången lånar Euppa Puppas lista. Välj **webbläsare** eller **enhetskod** (bra över SSH) per tenant.
-- **Läsande först, ändringar med ja.** Läsåtgärder körs direkt. Åtgärder märkta **ändrar** visar hela kommandot och
-  vilken tenant det gäller, och kräver ett **j** (eller `--ja` i CLI). `-n` visar bara vad som skulle köras.
-- **Excel eller CSV.** Efter en läsåtgärd: `x` för Excel, `c` för CSV, i `~/Documents/Euppa`.
-- **Ingen nyckelringsfråga.** På macOS sparas inloggningen som standard bara under körningen (`-ContextScope
-  Process`). Slå på *Kom ihåg inloggningar* (eller `euppa kom-ihåg på`) för att slippa logga in varje gång.
+- **Users first.** *Users…* lists everyone in the tenant. Type to fuzzy-search, tick one or more with
+  space (`ctrl+a` ticks everyone shown) and choose what should happen: add to a group, remove from a group,
+  assign a license, block, reset the password or MFA, give a role … Everything runs at once and is confirmed once.
+- **Areas.** 83 actions in 11 areas: users, guests, groups, devices, apps, roles and
+  PIM, Conditional Access, logs, security and the tenant. Start typing in any menu to search everything.
+- **Search the tenant.** When an action asks for a user, group, device, app, role, policy or license, part
+  of the name is enough. One match is picked directly, several give a list (checkboxes when several can be chosen).
+- **The right scopes per task.** Euppa signs in with `Connect-MgGraph` and exactly the scopes the action needs, and
+  adds more when needed without losing the old ones. *Sign in…* gives read access to almost everything at once.
+- **Tenants as in Puppa.** Signing in saves the tenant (domain, id, account) in *Tenants…*, so you can switch between
+  customers. The first time, Euppa borrows Puppa's list. Choose **browser** or **device code** (good over SSH) per tenant.
+- **Reading first, changes with a yes.** Read actions run directly. Actions marked **changes** show the whole command and
+  which tenant it applies to, and need a **y** (or `--yes` on the command line). `-n` only shows what would run.
+- **Excel or CSV.** After a read action: `x` for Excel, `c` for CSV, in `~/Documents/Euppa`.
+- **No keychain prompt.** On macOS the sign-in is kept only during the run by default (`-ContextScope
+  Process`). Turn on *Remember sign-ins* (or `euppa remember on`) to avoid signing in every time.
 
-## Kommandon
+## Language
+
+Euppa speaks **English** by default and **Swedish** on request: menus, actions, results and error messages. The choice is
+shared by the whole troupe: `euppa lang sv` or `euppa lang en`, or the **Language** row in the menu. `TRUPPA_LANG=sv` sets it
+for a single run. Swedish commands, action ids and field names (`euppa kör anvandare-sparra Anvandare=…`) still work.
+
+## Commands
 
 | | |
 |---|---|
-| `euppa` | menyn |
-| `euppa användare [UPN …]` | välj användare (flerval) och gör något med dem |
-| `euppa åtgärder [--json]` | alla åtgärder per område (`--json`: områden, åtgärder och fält för Ruppa) |
-| `euppa kör ÅTGÄRD [Namn=värde …]` | kör en åtgärd; frågar efter det som saknas |
-| `  --ja` | bekräfta ändrande åtgärder utan att fråga (krävs utan terminal) |
-| `  --excel` / `--csv` / `--json` | spara resultatet i `~/Documents/Euppa`, eller skriv ut det som JSON |
-| `euppa uppslag TYP [sök] [--alla] [--json]` | sök i tenanten: `user`, `group`, `device`, `app`, `sp`, `role`, `ca`, `sku`, `deleted` |
-| `euppa logga-in [--scopes A,B] [--enhetskod] [--tenant X]` | logga in i Microsoft Graph |
-| `euppa tenants` / `euppa tenant NAMN` / `euppa ny` | sparade tenants, växla, lägg till |
-| `euppa kom-ihåg på\|av` | spara inloggningar mellan körningar |
-| `euppa logga-ut` | `Disconnect-MgGraph` |
-| `-n`, `--torr` | visa kommandona utan att köra något |
-| `--no-anim` | inga animationer (stängs också av av `NO_COLOR` och när utdata pipas) |
+| `euppa` | the menu |
+| `euppa users [UPN …]` | pick users (multi-select) and do something with them |
+| `euppa actions [--json]` | every action per area (`--json`: areas, actions and fields for Ruppa) |
+| `euppa run ACTION [Name=value …]` | run an action; asks for anything missing |
+| `  --yes` | confirm actions that change something without asking (required without a terminal) |
+| `  --excel` / `--csv` / `--json` | save the result in `~/Documents/Euppa`, or print it as JSON |
+| `euppa lookup TYPE [search] [--all] [--json]` | search the tenant: `user`, `group`, `device`, `app`, `sp`, `role`, `ca`, `sku`, `deleted` |
+| `euppa login [--scopes A,B] [--device-code] [--tenant X]` | sign in to Microsoft Graph |
+| `euppa tenants` / `euppa tenant NAME` / `euppa new` | saved tenants, switch, add |
+| `euppa remember on\|off` | keep sign-ins between runs |
+| `euppa logout` | `Disconnect-MgGraph` |
+| `euppa lang [en\|sv]` | language for the whole troupe |
+| `-n`, `--dry-run` | show the commands without running anything |
+| `--no-anim` | no animations (also off with `NO_COLOR` and when the output is piped) |
 
-Flera värden skrivs kommaseparerat. Exempel:
+Several values are written comma-separated. Examples:
 
 ```bash
-euppa kör grupper-lagg-till Anvandare=anna@contoso.se,bo@contoso.se Grupp=Säljare --ja
-euppa kör appar-hemligheter-gar-ut Dagar=60 --excel
-euppa kör ca-lage Policy="Kräv MFA för admins" Lage=Report-only --ja
-euppa uppslag user --alla --json
+euppa run groups-add Users=anna@contoso.com,bo@contoso.com Group=Sales --yes
+euppa run apps-expiring-secrets Days=60 --excel
+euppa run ca-state Policy="Require MFA for admins" State=Report-only --yes
+euppa lookup user --all --json
 ```
 
-## Vad Euppa kan
+## What Euppa can do
 
-### Användare
+### Users
 
-| Åtgärd | | Vad den gör |
+| Action | | What it does |
 |---|---|---|
-| `anvandare-lista` | läs | **Lista användare.** Alla användare med status, typ, titel, avdelning och antal licenser. |
-| `anvandare-info` | läs | **Användarinfo.** Allt om en eller flera användare: kontakt, chef, status, synk, licenser, grupper och senaste inloggning. |
-| `anvandare-inaktiva` | läs | **Inaktiva användare.** Konton som inte loggat in på X dagar (eller aldrig). Kräver Entra ID P1 för inloggningsdatum. |
-| `anvandare-skapa` | ändrar | **Skapa användare.** Ny molnanvändare. Lämnar du lösenordet tomt hittar Euppa på ett starkt och visar det en gång. |
-| `anvandare-andra` | ändrar | **Ändra fält på användare.** Sätt titel, avdelning, kontor, mobil, företag m.m. på en eller flera användare. Tomt värde rensar fältet. |
-| `anvandare-sparra` | ändrar | **Spärra och logga ut.** Stänger av inloggningen och återkallar alla sessioner (token) direkt. Ditt eget konto hoppas över. |
-| `anvandare-aktivera` | ändrar | **Aktivera konto.** Slår på inloggningen igen för spärrade konton. |
-| `anvandare-losenord` | ändrar | **Återställ lösenord.** Nytt lösenord för en eller flera användare. Tomt = ett unikt, starkt lösenord per person som visas en gång. |
-| `anvandare-logga-ut` | ändrar | **Logga ut överallt.** Återkallar alla sessioner och uppdateringstoken. Användaren måste logga in igen på alla enheter. |
-| `anvandare-mfa` | läs | **MFA-metoder.** Vilka inloggningsmetoder användarna har registrerat: Authenticator, telefon, FIDO2-nyckel, Windows Hello … |
-| `anvandare-mfa-aterstall` | ändrar | **Återställ MFA.** Tar bort alla registrerade MFA-metoder (lösenordet behålls) och loggar ut. Användaren registrerar sig igen vid nästa inloggning. |
-| `anvandare-tap` | ändrar | **Tillfälligt lösenord (TAP).** Skapar ett Temporary Access Pass, t.ex. för att registrera MFA eller en ny dator. Kräver att TAP är påslaget i tenanten. |
-| `anvandare-licenser` | läs | **Användarens licenser.** Licenser per användare och om de är direkt tilldelade eller kommer via en grupp. |
-| `anvandare-licens-tilldela` | ändrar | **Tilldela licens.** Ger användarna en licens. Saknar någon användningsplats sätts den först (krävs för licenser). |
-| `anvandare-licens-ta-bort` | ändrar | **Ta bort licens.** Tar bort en direkt tilldelad licens. Licenser som kommer via grupp tas bort genom att ta bort användaren ur gruppen. |
-| `anvandare-chef` | ändrar | **Sätt chef.** Sätter chefen (manager) för en eller flera användare. |
-| `anvandare-grupper` | läs | **Användarens grupper och roller.** Grupper, adminroller och administrativa enheter som användarna är direkt medlemmar i. |
-| `anvandare-enheter` | läs | **Användarens enheter.** Enheter som användarna äger eller har registrerat. |
-| `anvandare-ta-bort` | ändrar | **Ta bort användare.** Raderar användarna. De ligger kvar under Raderade användare i 30 dagar och kan återställas. Ditt eget konto hoppas över. |
-| `anvandare-raderade` | läs | **Raderade användare.** Användare i papperskorgen och hur många dagar som är kvar innan de försvinner för gott. |
-| `anvandare-aterstall` | ändrar | **Återställ raderad användare.** Tar tillbaka raderade användare med licenser och gruppmedlemskap. |
+| `users-list` | read | **List users.** Every user with status, type, title, department and number of licenses. |
+| `users-info` | read | **User info.** Everything about one or more users: contact, manager, status, sync, licenses, groups and last sign-in. |
+| `users-inactive` | read | **Inactive users.** Accounts that haven't signed in for X days (or ever). Needs Entra ID P1 for sign-in dates. |
+| `users-create` | changes | **Create user.** New cloud user. Leave the password empty and Euppa makes up a strong one and shows it once. |
+| `users-edit` | changes | **Edit user field.** Set job title, department, office, mobile, company etc. on one or more users. An empty value clears the field. |
+| `users-block` | changes | **Block and sign out.** Blocks sign-in and revokes every session (token) right away. Your own account is skipped. |
+| `users-enable` | changes | **Enable account.** Turns sign-in back on for blocked accounts. |
+| `users-reset-password` | changes | **Reset password.** New password for one or more users. Empty = a unique, strong password per person, shown once. |
+| `users-sign-out` | changes | **Sign out everywhere.** Revokes every session and refresh token. The user has to sign in again on every device. |
+| `users-mfa` | read | **MFA methods.** Which sign-in methods the users have registered: Authenticator, phone, FIDO2 key, Windows Hello … |
+| `users-mfa-reset` | changes | **Reset MFA.** Removes every registered MFA method (the password stays) and signs out. The user registers again at next sign-in. |
+| `users-tap` | changes | **Temporary Access Pass.** Creates a Temporary Access Pass, e.g. to register MFA or a new PC. Needs TAP to be enabled in the tenant. |
+| `users-licenses` | read | **User's licenses.** Licenses per user, and whether they are assigned directly or through a group. |
+| `users-license-assign` | changes | **Assign license.** Gives the users a license. Anyone without a usage location gets one first (required for licenses). |
+| `users-license-remove` | changes | **Remove license.** Removes a directly assigned license. Group-based licenses go away by removing the user from the group. |
+| `users-manager` | changes | **Set manager.** Sets the manager for one or more users. |
+| `users-groups` | read | **User's groups and roles.** Groups, admin roles and administrative units the users are direct members of. |
+| `users-devices` | read | **User's devices.** Devices the users own or have registered. |
+| `users-delete` | changes | **Delete user.** Deletes the users. They stay under Deleted users for 30 days and can be restored. Your own account is skipped. |
+| `users-deleted` | read | **Deleted users.** Users in the recycle bin and how many days are left before they're gone for good. |
+| `users-restore` | changes | **Restore deleted user.** Brings deleted users back with licenses and group memberships. |
 
-### Gäster
+### Guests
 
-| Åtgärd | | Vad den gör |
+| Action | | What it does |
 |---|---|---|
-| `gaster-lista` | läs | **Lista gäster.** Alla gästkonton: inbjudan accepterad eller inte, när de bjöds in och senaste inloggning. |
-| `gaster-ej-accepterade` | läs | **Gäster som inte accepterat.** Inbjudningar som legat oaccepterade längre än X dagar – bra att städa bort. |
-| `gaster-bjud-in` | ändrar | **Bjud in gäst.** Bjuder in en eller flera externa (kommaseparerade e-postadresser) och visar inlösningslänken. |
+| `guests-list` | read | **List guests.** Every guest account: invitation accepted or not, when they were invited and last sign-in. |
+| `guests-pending` | read | **Guests who haven't accepted.** Invitations left unaccepted for more than X days – good candidates to clean up. |
+| `guests-invite` | changes | **Invite guest.** Invites one or more external users (comma-separated email addresses) and shows the redemption link. |
 
-### Grupper
+### Groups
 
-| Åtgärd | | Vad den gör |
+| Action | | What it does |
 |---|---|---|
-| `grupper-lista` | läs | **Lista grupper.** Alla grupper med typ (Microsoft 365, säkerhet, distribution), dynamiskt eller tilldelat medlemskap och e-post. |
-| `grupper-medlemmar` | läs | **Gruppmedlemmar.** Vilka som är med i gruppen – direkt, eller även via undergrupper. |
-| `grupper-agare` | läs | **Gruppens ägare.** Ägarna till en eller flera grupper. |
-| `grupper-utan-agare` | läs | **Grupper utan ägare.** Grupper som ingen äger – vanligt städobjekt. |
-| `grupper-dynamiska` | läs | **Dynamiska grupper.** Grupper med dynamiskt medlemskap, deras regel och om regeln är på eller pausad. |
-| `grupper-skapa` | ändrar | **Skapa grupp.** Ny säkerhetsgrupp eller Microsoft 365-grupp, med ägare och medlemmar direkt. |
-| `grupper-lagg-till` | ändrar | **Lägg till i grupp.** Lägger till användarna som medlemmar i en eller flera grupper. Redan medlem räknas som klart. |
-| `grupper-ta-bort` | ändrar | **Ta bort ur grupp.** Tar bort användarna ur en eller flera grupper. |
-| `grupper-agare-lagg-till` | ändrar | **Lägg till ägare.** Gör användarna till ägare av en eller flera grupper. |
-| `grupper-agare-ta-bort` | ändrar | **Ta bort ägare.** Tar bort användarna som ägare. En grupp måste ha minst en ägare kvar om den har ägare. |
-| `grupper-dynamisk-regel` | ändrar | **Sätt dynamisk regel.** Gör gruppen dynamisk med en regel, t.ex. (user.department -eq "Sälj"). Tilldelade medlemmar ersätts av regeln. |
-| `grupper-radera` | ändrar | **Radera grupp.** Raderar grupperna. Microsoft 365-grupper kan återställas i 30 dagar, säkerhetsgrupper inte. |
+| `groups-list` | read | **List groups.** Every group with type (Microsoft 365, security, distribution), dynamic or assigned membership and email. |
+| `groups-members` | read | **Group members.** Who is in the group – directly, or also through nested groups. |
+| `groups-owners` | read | **Group owners.** The owners of one or more groups. |
+| `groups-without-owners` | read | **Groups without owners.** Groups nobody owns – a common clean-up item. |
+| `groups-dynamic` | read | **Dynamic groups.** Groups with dynamic membership, their rule and whether the rule is on or paused. |
+| `groups-create` | changes | **Create group.** New security group or Microsoft 365 group, with owners and members right away. |
+| `groups-add` | changes | **Add to group.** Adds the users as members of one or more groups. Already a member counts as done. |
+| `groups-remove` | changes | **Remove from group.** Removes the users from one or more groups. |
+| `groups-owners-add` | changes | **Add owner.** Makes the users owners of one or more groups. |
+| `groups-owners-remove` | changes | **Remove owner.** Removes the users as owners. A group with owners must keep at least one. |
+| `groups-dynamic-rule` | changes | **Set dynamic rule.** Makes the group dynamic with a rule, e.g. (user.department -eq "Sales"). The rule replaces assigned members. |
+| `groups-delete` | changes | **Delete group.** Deletes the groups. Microsoft 365 groups can be restored for 30 days, security groups can't. |
 
-### Enheter
+### Devices
 
-| Åtgärd | | Vad den gör |
+| Action | | What it does |
 |---|---|---|
-| `enheter-lista` | läs | **Lista enheter.** Alla enheter i Entra ID: OS, anslutning (Entra-ansluten, hybrid, registrerad), status och senaste inloggning. |
-| `enheter-inaktiva` | läs | **Inaktiva enheter.** Enheter som inte loggat in på X dagar – kandidater att inaktivera och sedan ta bort. |
-| `enheter-inaktivera` | ändrar | **Inaktivera enhet.** Stänger av enheterna i Entra ID (de kan inte logga in), utan att ta bort dem. |
-| `enheter-aktivera` | ändrar | **Aktivera enhet.** Slår på inaktiverade enheter igen. |
-| `enheter-ta-bort` | ändrar | **Ta bort enhet.** Raderar enheterna ur Entra ID. BitLocker-nycklar och LAPS-lösenord försvinner med dem – läs ut dem först. |
-| `enheter-bitlocker` | läs | **BitLocker-nycklar.** Återställningsnycklar för enheterna. Varje uppslag loggas i granskningsloggen. |
-| `enheter-laps` | läs | **LAPS-lösenord.** Det lokala adminlösenordet (Windows LAPS i Entra ID) för enheterna. Varje uppslag loggas. |
+| `devices-list` | read | **List devices.** Every device in Entra ID: OS, join type (Entra joined, hybrid, registered), status and last sign-in. |
+| `devices-inactive` | read | **Inactive devices.** Devices that haven't signed in for X days – candidates to disable and then delete. |
+| `devices-disable` | changes | **Disable device.** Disables the devices in Entra ID (they can't sign in) without deleting them. |
+| `devices-enable` | changes | **Enable device.** Turns disabled devices back on. |
+| `devices-delete` | changes | **Delete device.** Deletes the devices from Entra ID. BitLocker keys and LAPS passwords go with them – read them out first. |
+| `devices-bitlocker` | read | **BitLocker keys.** Recovery keys for the devices. Every lookup is recorded in the audit log. |
+| `devices-laps` | read | **LAPS password.** The local admin password (Windows LAPS in Entra ID) for the devices. Every lookup is logged. |
 
-### Appar
+### Apps
 
-| Åtgärd | | Vad den gör |
+| Action | | What it does |
 |---|---|---|
-| `appar-lista` | läs | **Appregistreringar.** Alla appregistreringar med antal hemligheter och certifikat och när första går ut. |
-| `appar-hemligheter-gar-ut` | läs | **Hemligheter och certifikat som går ut.** Klienthemligheter och certifikat (även SAML-signering på företagsappar) som går ut inom X dagar eller redan gått ut. |
-| `appar-behorigheter` | läs | **Appens behörigheter.** API-behörigheter appen begär, delegerade och programbehörigheter, och om de har samtycke. |
-| `appar-hemlighet-ny` | ändrar | **Ny klienthemlighet.** Skapar en ny hemlighet på appen. Värdet visas bara den här gången – kopiera det direkt. |
-| `appar-hemligheter-rensa` | ändrar | **Ta bort utgångna hemligheter.** Rensar bort klienthemligheter som redan gått ut från apparna. |
-| `foretagsappar-lista` | läs | **Företagsappar.** Företagsappar (enterprise applications): på/av, om tilldelning krävs, och om appen är egen eller extern. |
-| `foretagsappar-samtycken` | läs | **Samtycken (delegerade).** Vilka appar som fått delegerade behörigheter, av admin för alla eller av enskilda användare. |
-| `foretagsappar-anvandare` | läs | **Vem har åtkomst till appen.** Användare, grupper och appar som är tilldelade företagsappen, med roll. |
-| `foretagsappar-samtycke` | ändrar | **Bevilja adminsamtycke.** Ger samtycke för hela organisationen till alla behörigheter appen begär (som knappen i portalen). |
-| `foretagsappar-aterkalla` | ändrar | **Återkalla samtycke.** Tar bort alla samtycken (delegerade och/eller programbehörigheter) som företagsappen har fått. |
-| `foretagsappar-av-pa` | ändrar | **Stäng av eller slå på företagsapp.** Av = ingen kan logga in i appen (bra vid misstänkt app). På = tillbaka igen. |
+| `apps-list` | read | **App registrations.** Every app registration with the number of secrets and certificates and when the first one expires. |
+| `apps-expiring-secrets` | read | **Expiring secrets and certificates.** Client secrets and certificates (SAML signing on enterprise apps too) that expire within X days or already have. |
+| `apps-permissions` | read | **App permissions.** API permissions the app requests, delegated and application, and whether they have consent. |
+| `apps-secret-new` | changes | **New client secret.** Creates a new secret on the app. The value is shown only this once – copy it right away. |
+| `apps-secrets-cleanup` | changes | **Remove expired secrets.** Removes client secrets that have already expired from the apps. |
+| `enterprise-apps-list` | read | **Enterprise apps.** Enterprise applications: on/off, whether assignment is required, and whether the app is your own or external. |
+| `enterprise-apps-consents` | read | **Consents (delegated).** Which apps have delegated permissions, granted by an admin for everyone or by individual users. |
+| `enterprise-apps-access` | read | **Who has access to the app.** Users, groups and apps assigned to the enterprise app, with role. |
+| `enterprise-apps-grant-consent` | changes | **Grant admin consent.** Grants consent for the whole organisation to every permission the app requests (like the button in the portal). |
+| `enterprise-apps-revoke-consent` | changes | **Revoke consent.** Removes every consent (delegated and/or application permissions) the enterprise app has received. |
+| `enterprise-apps-toggle` | changes | **Turn an enterprise app off or on.** Off = nobody can sign in to the app (good for a suspicious app). On = back again. |
 
-### Roller och PIM
+### Roles and PIM
 
-| Åtgärd | | Vad den gör |
+| Action | | What it does |
 |---|---|---|
-| `roller-lista` | läs | **Vem har adminroller.** Alla aktiva rolltilldelningar: roll, vem och omfattning. |
-| `roller-anvandarens` | läs | **Användarens roller.** Aktiva och berättigade (PIM) roller för användarna. |
-| `pim-berattigade` | läs | **Berättigade roller (PIM).** Alla som kan aktivera en roll i PIM, och hur länge de får. Kräver Entra ID P2. |
-| `pim-aktiva` | läs | **Aktiva PIM-tilldelningar.** Roller som är aktiva just nu – permanenta och aktiverade via PIM – med sluttid. Kräver Entra ID P2. |
-| `roller-tilldela` | ändrar | **Tilldela roll.** Ger användarna en adminroll – helst som berättigad i PIM (aktiveras vid behov) i stället för permanent. |
-| `roller-ta-bort` | ändrar | **Ta bort roll.** Tar bort rollen från användarna – både aktiva och berättigade (PIM) tilldelningar. |
-| `pim-aktivera` | ändrar | **Aktivera min roll (PIM).** Aktiverar en roll du är berättigad till, i några timmar. Kräver ofta MFA och motivering. |
+| `roles-list` | read | **Who has admin roles.** Every active role assignment: role, who and scope. |
+| `roles-user` | read | **User's roles.** Active and eligible (PIM) roles for the users. |
+| `pim-eligible` | read | **Eligible roles (PIM).** Everyone who can activate a role in PIM, and for how long. Needs Entra ID P2. |
+| `pim-active` | read | **Active PIM assignments.** Roles that are active right now – permanent and activated through PIM – with end time. Needs Entra ID P2. |
+| `roles-assign` | changes | **Assign role.** Gives the users an admin role – preferably as eligible in PIM (activated when needed) instead of permanent. |
+| `roles-remove` | changes | **Remove role.** Removes the role from the users – both active and eligible (PIM) assignments. |
+| `pim-activate` | changes | **Activate my role (PIM).** Activates a role you're eligible for, for a few hours. Often needs MFA and a justification. |
 
-### Villkorlig åtkomst
+### Conditional Access
 
-| Åtgärd | | Vad den gör |
+| Action | | What it does |
 |---|---|---|
-| `ca-lista` | läs | **Policyer för villkorlig åtkomst.** Alla policyer: på, av eller report-only, vem och vilka appar de gäller och vad de kräver. |
-| `ca-detalj` | läs | **Policy i klartext.** En policy uppdelad i vem, appar, villkor och krav – med namn i stället för id:n. |
-| `ca-lage` | ändrar | **Byt läge på policy.** Sätt policyer i report-only (loggar vad som skulle hänt), på eller av. |
-| `ca-undanta` | ändrar | **Undanta användare från policy.** Lägger till användare som undantag i policyer, t.ex. break-glass-konton. |
-| `ca-platser` | läs | **Namngivna platser.** IP-intervall och länder som används i policyerna, och vilka som är betrodda. |
-| `ca-plats-ny` | ändrar | **Ny namngiven plats.** Skapar en plats av IP-intervall (CIDR, t.ex. 203.0.113.0/24) eller länder (SE, NO …). |
+| `ca-list` | read | **Conditional Access policies.** Every policy: on, off or report-only, who and which apps it applies to and what it requires. |
+| `ca-detail` | read | **Policy in plain words.** A policy broken down into who, apps, conditions and controls – with names instead of ids. |
+| `ca-state` | changes | **Change policy state.** Put policies in report-only (logs what would have happened), on or off. |
+| `ca-exclude` | changes | **Exclude users from policy.** Adds users as exclusions in policies, e.g. break-glass accounts. |
+| `ca-locations` | read | **Named locations.** IP ranges and countries used in the policies, and which ones are trusted. |
+| `ca-location-new` | changes | **New named location.** Creates a location from IP ranges (CIDR, e.g. 203.0.113.0/24) or countries (SE, NO …). |
 
-### Loggar
+### Logs
 
-| Åtgärd | | Vad den gör |
+| Action | | What it does |
 |---|---|---|
-| `loggar-inloggningar` | läs | **Inloggningar.** Inloggningsloggen: vem, app, IP, plats, resultat och villkorlig åtkomst. Kräver Entra ID P1 (max 999 rader). |
-| `loggar-misslyckade` | läs | **Misslyckade inloggningar per användare.** Sammanställning: vem som misslyckats, hur många gånger, med vilket fel och från hur många IP. |
-| `loggar-granskning` | läs | **Granskningslogg.** Vem ändrade vad i katalogen: användare, grupper, roller, appar, policyer (max 999 rader). |
+| `logs-signins` | read | **Sign-ins.** The sign-in log: who, app, IP, location, result and Conditional Access. Needs Entra ID P1 (max 999 rows). |
+| `logs-failed` | read | **Failed sign-ins per user.** Summary: who failed, how many times, with which error and from how many IPs. |
+| `logs-audit` | read | **Audit log.** Who changed what in the directory: users, groups, roles, apps, policies (max 999 rows). |
 
-### Säkerhet
+### Security
 
-| Åtgärd | | Vad den gör |
+| Action | | What it does |
 |---|---|---|
-| `risk-anvandare` | läs | **Riskanvändare.** Användare som Entra ID Protection flaggat som riskabla. Kräver Entra ID P2. |
-| `risk-handelser` | läs | **Riskhändelser.** Upptäckta risker: okänd plats, läckta lösenord, omöjlig resa m.m. Kräver Entra ID P2. |
-| `risk-avfarda` | ändrar | **Avfärda användarrisk.** Markerar risken som hanterad (t.ex. efter lösenordsbyte). |
-| `risk-komprometterad` | ändrar | **Bekräfta komprometterad.** Sätter användarrisken till hög (bekräftat komprometterad), så att riskpolicyer slår till. Spärra kontot också. |
-| `mfa-status` | läs | **MFA-status i tenanten.** Vilka som har MFA registrerat, med vilka metoder, och om de är admins. Kräver Entra ID P1. |
+| `risk-users` | read | **Risky users.** Users Entra ID Protection has flagged as risky. Needs Entra ID P2. |
+| `risk-detections` | read | **Risk detections.** Detected risks: unfamiliar location, leaked credentials, impossible travel etc. Needs Entra ID P2. |
+| `risk-dismiss` | changes | **Dismiss user risk.** Marks the risk as handled (e.g. after a password change). |
+| `risk-compromised` | changes | **Confirm compromised.** Sets the user risk to high (confirmed compromised) so risk policies kick in. Block the account too. |
+| `mfa-status` | read | **MFA status in the tenant.** Who has MFA registered, with which methods, and whether they are admins. Needs Entra ID P1. |
 
 ### Tenant
 
-| Åtgärd | | Vad den gör |
+| Action | | What it does |
 |---|---|---|
-| `tenant-licenser` | läs | **Licensöversikt.** Alla licenser: köpta, använda, lediga och status. |
-| `tenant-licens-anvandare` | läs | **Vilka har licensen.** Alla användare med en viss licens, och om den är direkt eller via grupp. |
-| `tenant-domaner` | läs | **Domäner.** Domänerna i tenanten: verifierade, standard, federerade och vad de används till. |
-| `tenant-info` | läs | **Företagsinfo.** Namn, tenant-id, land, skapad, katalogsynk och om säkerhetsstandarder är på. |
-| `tenant-installningar` | läs | **Företagsinställningar.** Vad användare får göra: registrera appar, skapa grupper och tenants, bjuda in gäster, samtycka till appar m.m. |
-| `tenant-installning-andra` | ändrar | **Ändra företagsinställning.** Slå på eller av: appregistrering, grupp- och tenantskapande, gästinbjudningar, användarsamtycke, säkerhetsstandarder. |
+| `tenant-licenses` | read | **License overview.** Every license: purchased, used, available and status. |
+| `tenant-license-users` | read | **Who has the license.** Every user with a given license, and whether it's direct or through a group. |
+| `tenant-domains` | read | **Domains.** The domains in the tenant: verified, default, federated and what they're used for. |
+| `tenant-info` | read | **Organisation info.** Name, tenant id, country, created, directory sync and whether security defaults are on. |
+| `tenant-settings` | read | **Organisation settings.** What users are allowed to do: register apps, create groups and tenants, invite guests, consent to apps etc. |
+| `tenant-setting-change` | changes | **Change organisation setting.** Turn on or off: app registration, creating groups and tenants, guest invitations, user consent, security defaults. |
 
-### Lokalt
+### Local
 
-| Åtgärd | | Vad den gör |
+| Action | | What it does |
 |---|---|---|
-| `lokalt-session` | lokal | **Min inloggning.** Vem du är inloggad som, i vilken tenant och med vilka scopes. |
-| `lokalt-moduler` | lokal | **Moduler.** PowerShell och modulerna Euppa använder, med version. |
+| `local-session` | local | **My sign-in.** Who you're signed in as, in which tenant and with which scopes. |
+| `local-modules` | local | **Modules.** PowerShell and the modules Euppa uses, with version. |
 
-## Behörigheter och licenser
+## Permissions and licenses
 
-Euppa använder appen *Microsoft Graph Command Line Tools* med delegerade behörigheter: du kan aldrig göra mer än ditt
-konto får. Första gången ett nytt scope behövs frågar Microsoft om samtycke (en Global Admin kan godkänna för
-hela organisationen). Inloggnings- och granskningsloggar, MFA-status och villkorlig åtkomst kräver **Entra ID P1**;
-riskanvändare, riskhändelser och PIM kräver **Entra ID P2**. Euppa säger till på svenska när något saknas.
+Euppa uses the app *Microsoft Graph Command Line Tools* with delegated permissions: you can never do more than your
+account is allowed to. The first time a new scope is needed, Microsoft asks for consent (a Global Admin can approve it for
+the whole organisation). Sign-in and audit logs, MFA status and Conditional Access need **Entra ID P1**;
+risky users, risk detections and PIM need **Entra ID P2**. Euppa tells you in plain words when something is missing.
 
-## I Ruppa
+## In Ruppa
 
-[Ruppa](https://github.com/pipebreak33/ruppa) visar Euppa som en egen sida (⌘5) med områden, kort och formulär.
-Ruppa är bara ett skal: den läser områden, åtgärder och fält ur den installerade `euppa.py` och kör
-`euppa kör … --json`, `euppa uppslag … --json` och `euppa åtgärder --json`. Nya åtgärder i Euppa syns där direkt.
+[Ruppa](https://github.com/pipebreak33/ruppa) shows Euppa as its own page (⌘5) with areas, cards and forms.
+Ruppa is only a shell: it reads areas, actions and fields from the installed `euppa.py` and runs
+`euppa run … --json`, `euppa lookup … --json` and `euppa actions --json`. New actions in Euppa show up there directly.
 
-## Teknik
+## Technology
 
-En Python-fil (bara standardbiblioteket, 3.8+) som håller en PowerShell 7-process öppen, så att Graph-inloggningen
-lever mellan åtgärderna. Varje åtgärd är ett litet PowerShell-skript i `ACTIONS` i `euppa.py`, som pratar med Graph
-via en tunn hjälpfunktion (`Graph 'users?$select=…' -All`) med sidhantering, felmeddelanden i klartext och uppslag
-av namn till id. Data i `~/.euppa` (`kunder.json`, `config.json`) – inga hemligheter, inga token.
+One Python file (standard library only, 3.8+) that keeps a PowerShell 7 process open, so the Graph sign-in
+lives between actions. Every action is a small PowerShell script in `ACTIONS` in `euppa.py`, which talks to Graph
+through a thin helper (`Graph 'users?$select=…' -All`) with paging, plain-language error messages and lookups
+from names to ids. Data in `~/.euppa` (`kunder.json`, `config.json`): no secrets, no tokens.
 
-## Licens
+## License
 
 MIT

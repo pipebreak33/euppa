@@ -23,6 +23,10 @@ $Dir = Join-Path $HOME '.euppa'
 $App = Join-Path $Dir 'app'
 $PyVersion = '3.12.8'
 
+# Language: TRUPPA_LANG, else ~/.truppa/config.json (shared by the whole troupe), else English
+$TL = $env:TRUPPA_LANG
+if (-not $TL) { try { $TL = (Get-Content -Raw -LiteralPath (Join-Path $HOME '.truppa/config.json') -ErrorAction Stop | ConvertFrom-Json).lang } catch { } }
+function T([string]$en, [string]$sv) { if ("$TL" -like 'sv*') { $sv } else { $en } }
 function Say($m)  { Write-Host "  E› $m" -ForegroundColor Magenta }
 function Warn($m) { Write-Host "  ! $m" -ForegroundColor Yellow }
 
@@ -63,19 +67,19 @@ function Find-Python {
 
 function Install-Python {
     if (-not $OnWindows) {
-        throw 'Python 3.8+ saknas. macOS: xcode-select --install (eller brew install python). Linux: sudo apt install python3.'
+        throw (T 'Python 3.8+ is missing. macOS: xcode-select --install (or brew install python). Linux: sudo apt install python3.' 'Python 3.8+ saknas. macOS: xcode-select --install (eller brew install python). Linux: sudo apt install python3.')
     }
     Update-SessionPath
     if (Get-Command winget -ErrorAction SilentlyContinue) {
-        Say 'Installerar Python 3 med winget'
+        Say (T 'Installing Python 3 with winget' 'Installerar Python 3 med winget')
         winget install --id Python.Python.3.12 -e --scope user --silent --accept-package-agreements --accept-source-agreements
         if ($LASTEXITCODE -eq 0) { Update-SessionPath; return }
-        Warn 'winget kunde inte installera Python, provar python.org'
+        Warn (T 'winget could not install Python, trying python.org' 'winget kunde inte installera Python, provar python.org')
     }
     $arch = switch ($env:PROCESSOR_ARCHITECTURE) { 'ARM64' { '-arm64' } 'x86' { '' } default { '-amd64' } }
     $url = "https://www.python.org/ftp/python/$PyVersion/python-$PyVersion$arch.exe"
     $exe = Join-Path $env:TEMP "python-$PyVersion-setup.exe"
-    Say "Hämtar Python $PyVersion från python.org"
+    Say (T "Fetching Python $PyVersion from python.org" "Hämtar Python $PyVersion från python.org")
     Invoke-WebRequest $url -OutFile $exe -UseBasicParsing
     $p = Start-Process $exe -ArgumentList '/quiet', 'InstallAllUsers=0', 'PrependPath=1', 'Include_launcher=1',
                                          'Include_test=0', 'Shortcuts=0' -Wait -PassThru
@@ -93,7 +97,7 @@ $py = Find-Python
 if (-not $py) {
     Install-Python
     $py = Find-Python
-    if (-not $py) { throw 'Python installerades men syns inte än. Öppna ett NYTT PowerShell-fönster och kör installationen igen.' }
+    if (-not $py) { throw (T 'Python was installed but is not visible yet. Open a NEW PowerShell window and run the installation again.' 'Python installerades men syns inte än. Öppna ett NYTT PowerShell-fönster och kör installationen igen.') }
 }
 
 # 2. Källan: en lokal checkout bredvid skriptet, annars arkivet från GitHub
@@ -101,22 +105,22 @@ $src = $null
 $tmp = $null
 if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot 'euppa.py')) -and $env:EUPPA_FROM_WEB -ne '1') {
     $src = $PSScriptRoot
-    Say "Installerar från $src"
+    Say (T "Installing from $src" "Installerar från $src")
 }
 try {
     if (-not $src) {
         $tmp = Join-Path ([IO.Path]::GetTempPath()) ("euppa-" + [guid]::NewGuid().ToString('N'))
         New-Item -ItemType Directory -Force -Path $tmp | Out-Null
         $zip = Join-Path $tmp 'euppa.zip'
-        Say "Hämtar Euppa från github.com/$Repo ($Branch)"
+        Say (T "Fetching Euppa from github.com/$Repo ($Branch)" "Hämtar Euppa från github.com/$Repo ($Branch)")
         Invoke-WebRequest "https://github.com/$Repo/archive/$Branch.zip" -OutFile $zip -UseBasicParsing
         Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force
         $found = Get-ChildItem -Path $tmp -Filter 'euppa.py' -Recurse -Depth 2 | Select-Object -First 1
-        if (-not $found) { throw 'Arkivet innehåller inte Euppa.' }
+        if (-not $found) { throw (T 'The archive does not contain Euppa.' 'Arkivet innehåller inte Euppa.') }
         $src = $found.DirectoryName
     }
     Invoke-Py @('-c', 'import ast,sys; ast.parse(open(sys.argv[1],encoding="utf-8").read())', (Join-Path $src 'euppa.py'))
-    if ($LASTEXITCODE -ne 0) { throw 'euppa.py är trasig.' }
+    if ($LASTEXITCODE -ne 0) { throw (T 'euppa.py is broken.' 'euppa.py är trasig.') }
 
     # 3. Byt ut programmet (~/.euppa/app). Dina tenants och inställningar i ~/.euppa rörs inte.
     New-Item -ItemType Directory -Force -Path $Dir | Out-Null
@@ -156,7 +160,7 @@ if ($OnWindows) {
     Set-Content -Path $shim -Value "#!/usr/bin/env sh`nexec `"$($py[0])`" `"$target`" `"`$@`"`n" -NoNewline
     chmod +x $shim
     if ((($env:PATH -split ':') -notcontains $bin)) {
-        Warn "Lägg till $bin i PATH (t.ex. i ~/.zshrc: export PATH=`"`$HOME/.local/bin:`$PATH`")"
+        Warn (T "Add $bin to PATH (e.g. in ~/.zshrc: export PATH=`"`$HOME/.local/bin:`$PATH`")" "Lägg till $bin i PATH (t.ex. i ~/.zshrc: export PATH=`"`$HOME/.local/bin:`$PATH`")")
     }
 }
 
@@ -166,14 +170,14 @@ if ($pwsh) {
     $mods = 'Microsoft.Graph.Authentication', 'ImportExcel'
     $missing = @(& $pwsh.Source -NoLogo -NoProfile -NonInteractive -Command ("'" + ($mods -join "','") + "' | Where-Object { -not (Get-Module -ListAvailable -Name `$_) }") 2>$null)
     if ($missing.Count) {
-        Warn "Moduler som saknas: $($missing -join ', ')"
-        Warn "Installera: pwsh -c 'Install-PSResource $($missing -join ',') -Scope CurrentUser -TrustRepository'   (eller: uppa install Microsoft.Graph)"
+        Warn (T "Missing modules: $($missing -join ', ')" "Moduler som saknas: $($missing -join ', ')")
+        Warn (T "Install: pwsh -c 'Install-PSResource $($missing -join ',') -Scope CurrentUser -TrustRepository'   (or: uppa install Microsoft.Graph)" "Installera: pwsh -c 'Install-PSResource $($missing -join ',') -Scope CurrentUser -TrustRepository'   (eller: uppa install Microsoft.Graph)")
     }
 } else {
-    Warn 'PowerShell 7 (pwsh) saknas. Installera: winget install Microsoft.PowerShell   (eller: uppa install powershell)'
+    Warn (T 'PowerShell 7 (pwsh) is missing. Install: winget install Microsoft.PowerShell   (or: uppa install powershell)' 'PowerShell 7 (pwsh) saknas. Installera: winget install Microsoft.PowerShell   (eller: uppa install powershell)')
 }
 
 $ver = Invoke-Py @($target, '--version') 2>$null
 $Clock.Stop(); $took = if ($Clock.Elapsed.TotalSeconds -ge 60) { '{0} min {1} s' -f [int][math]::Floor($Clock.Elapsed.TotalMinutes), $Clock.Elapsed.Seconds } else { '{0} s' -f [int]$Clock.Elapsed.TotalSeconds }
-Write-Host "`n  ✔ $ver installerad på $took. Öppna en ny terminal och kör: euppa" -ForegroundColor Green
-Write-Host "  Avinstallera: irm https://raw.githubusercontent.com/pipebreak33/euppa/main/uninstall.ps1 | iex`n" -ForegroundColor DarkGray
+Write-Host (T "`n  ✔ $ver installed in $took. Open a new terminal and run: euppa" "`n  ✔ $ver installerad på $took. Öppna en ny terminal och kör: euppa") -ForegroundColor Green
+Write-Host "  $(T 'Uninstall:' 'Avinstallera:') irm https://raw.githubusercontent.com/pipebreak33/euppa/main/uninstall.ps1 | iex`n" -ForegroundColor DarkGray
